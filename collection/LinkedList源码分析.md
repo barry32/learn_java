@@ -51,7 +51,8 @@ public boolean addAll(int index, Collection<? extends E> c) {
             //在后面的逻辑中会有判断。反之，当前LinkedList中含有元素，pred置为last无可厚非。
             pred = last;
         } else {
-        //说明插入的起始位置其实是有人的，那么本次元素的插入属于插队的形式。需要将该位置原来的元素保			//存起来最后后继节点。同样的当前元素的前一个元素位置即为前驱节点。
+        //说明插入的起始位置其实是有人的，那么本次元素的插入属于插队的形式。需要将该位置原来的元素保			
+	//存起来最后后继节点。同样的当前元素的前一个元素位置即为前驱节点。
             succ = node(index);
             pred = succ.prev;
         }
