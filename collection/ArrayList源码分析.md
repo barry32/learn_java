@@ -130,3 +130,5 @@ private void grow(int minCapacity) {
     }
 ```
 
+到这里，我们可以总结一下。ArrayList 底层是个数组，默认大小是10，采用尾插法的方式，每当我们修改或者移除一个现有元素，又或是添加一个新的元素，modCount总是会增加一个。ArrayList的**扩容机制**是自身size加上size的逻辑右移（1/2 size）这样扩容1.5倍，删除某一个中间元素需要将后面的元素向前移动。ArrayList底层因为是数组，所有具有RandomAccess的特性，查询时间复杂度时O(1),所以ArrayList 面向的业务场景是查询次数较多但是，不是经常修改的数据。
+
