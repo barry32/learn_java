@@ -127,8 +127,11 @@ private boolean remove(Object o, Object[] snapshot, int index) {
         int len = current.length;
         //如果底层数组的快照跟当前数组不一致，说明被其他线程操作过数据，需要判断所需要删除的元素是否还在当前数组当中，
         //又或者还是当初的那个下标。 这便是用的是goto，一旦break就会跳出当前{}的区域并继续执行后面的语句
-        if (snapshot != current) findIndex: {
-            //此处需要取最小值，防止当前数组的元素个数已经减少到比期望中的index下标还少的情况。
+         
+        if (snapshot != current) findIndex: {   
+            //此处取最小值，防止当前数组的元素个数已经减少到比期望中的index下标还少的情况。
+            //这意味着在本次判断中尚未考虑数组元素增多，将原来期望中需要被删除的index位置的元素，挤到index+1到len的位置。
+            //所以考察的范围在于小于等于index数组下标范围。
             int prefix = Math.min(index, len);
             for (int i = 0; i < prefix; i++) {
                 //current[i] ==snapshot[i]说明该元素并未修改或者属于ABA的情况。
@@ -145,7 +148,7 @@ private boolean remove(Object o, Object[] snapshot, int index) {
             //数组虽然被改变，但是期望中需要被删除的值处于当前的数组未发生变化的位置。
             if (current[index] == o)
                 break findIndex;
-            //在index到len剩余的部分寻找元素
+            //在index到len剩余的部分寻找元素（此处考虑的是current数组相比snapshot元素增多的情况。）
             index = indexOf(o, current, index, len);
             if (index < 0)
                 return false;
