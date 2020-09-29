@@ -126,7 +126,7 @@ private boolean remove(Object o, Object[] snapshot, int index) {
         Object[] current = getArray();
         int len = current.length;
         //如果底层数组的快照跟当前数组不一致，说明被其他线程操作过数据，需要判断所需要删除的元素是否还在当前数组当中，
-        //又或者还是当初的那个下标。 这便是用的是goto，一旦break就会跳出当前{}的区域并继续执行后面的语句
+        //又或者还是当初的那个下标。 这边使用的是goto，一旦break就会跳出当前{}的区域并继续执行后面的语句
          
         if (snapshot != current) findIndex: {   
             //此处取最小值，防止当前数组的元素个数已经减少到比期望中的index下标还少的情况。
