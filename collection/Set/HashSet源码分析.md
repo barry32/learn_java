@@ -94,4 +94,4 @@ public boolean remove(Object o) {
 }
 ```
 
-本章的篇幅不长，HashSet继承了AbstractSet的基本骨架类并具有可克隆、序列化的特性。同时HashSet内部是通过将新添加的元素作为内部HashMap的key来保证无序不重复的性质，从这一点，也解释了为什么HashSet会用Hash来修饰自己名字的缘故。
+本章的篇幅不长，HashSet继承了AbstractSet的基本骨架类并具有可克隆、序列化的特性。同时HashSet内部是通过将新添加的元素作为内部HashMap的key来保证无序不重复的性质，从这一点，也解释了为什么HashSet会用Hash来修饰自己名字的缘故，至于底层中的Map的相关操作，在HashMap中一一展开。
