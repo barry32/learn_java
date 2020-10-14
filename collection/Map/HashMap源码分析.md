@@ -43,23 +43,24 @@ public HashMap(int initialCapacity, float loadFactor) {
     this.loadFactor = loadFactor;
     this.threshold = tableSizeFor(initialCapacity);
 }
-
-//tableSizeFor 方法就是将用户自定的初始化容量转变最接近的2的幂次的数字
-//那么为什么要让HashMap的容量为2的幂次呢？
-//在数据结构这门课程的散列表学习中，当我们向哈希表中插入的数据的时候。假设我们有一个length为7的表，
-//需要插入数值16到哈希表，我们用16取7的模为2，那么我们将16这个数存在放在哈希表中的index为2的位置
-//（index默认从0开始）
-// 然而在HashMap中的是采用的hash&(length-1)这样的位与元素来代替我们大学中学的取模运算的方式，
-//来获取所要存储元素的下标位置，而这一计算的前提都是依赖于HashMap的容量大小为2的幂次。
-//那么问题转化为，
-//假设HashMap的容量为2的幂次，证明hash&(length-1) = hash%length，其中2^n=length
-//解:
-//首先length是2的幂次，所以换算为二进制为1000...0,1 后面n个0，那么length-1必然是0111...1, 0后面n个1
-//那么hash&(length-1)的结果必然是hash二进制中的后n位数字。
-//hash/lenth等价于 hash/2^n等于二进制中hash右移n位，即移除二进制中hash的后n位数字。
-//（左移n位的话，右边需补n个0），被移除的hash中的后n位即为hash&（length-1），hash/lenth剩下的是商，
-//舍弃的是余数，而hash/lenth的余数等于hash%length。
-//所以hash&(length-1) = hash%length,当HashMap的容量为2的幂次的情况下成立。
+  /**
+    *tableSizeFor 方法就是将用户自定的初始化容量转变最接近的2的幂次的数字
+    *那么为什么要让HashMap的容量为2的幂次呢？
+    *在数据结构这门课程的散列表学习中，当我们向哈希表中插入的数据的时候。假设我们有一个length为7的表，
+    *需要插入数值16到哈希表，我们用16取7的模为2，那么我们将16这个数存在放在哈希表中的index为2的位置
+    *（index默认从0开始）
+    * 然而在HashMap中的是采用的hash&(length-1)这样的位与元素来代替我们大学中学的取模运算的方式，
+    *来获取所要存储元素的下标位置，而这一计算的前提都是依赖于HashMap的容量大小为2的幂次。
+    *那么问题转化为，
+    *假设HashMap的容量为2的幂次，证明hash&(length-1) = hash%length，其中2^n=length
+    *解:
+    *首先length是2的幂次，所以换算为二进制为1000...0,1 后面n个0，那么length-1必然是0111...1, 0后面n个1
+    *那么hash&(length-1)的结果必然是hash二进制中的后n位数字。
+    *hash/lenth等价于 hash/2^n等于二进制中hash右移n位，即移除二进制中hash的后n位数字。
+    *（左移n位的话，右边需补n个0），被移除的hash中的后n位即为hash&（length-1），hash/lenth剩下的是商，
+    *舍弃的是余数，而hash/lenth的余数等于hash%length。
+    *所以hash&(length-1) = hash%length,当HashMap的容量为2的幂次的情况下成立。
+    */
 static final int tableSizeFor(int cap) {
     int n = cap - 1;
     n |= n >>> 1;
