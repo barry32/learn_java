@@ -76,11 +76,15 @@ static final int tableSizeFor(int cap) {
 
 ```java
 transient Node<K,V>[] table;
-
+static final int UNTREEIFY_THRESHOLD = 6;
 public V put(K key, V value) {
     return putVal(hash(key), key, value, false, true);
 }
-//首先计算hash值，hashCode算数右移16位来异或hashCode
+/**
+  *首先计算hash值，hashCode是32位的,使用高16位来异或低16位
+  *那么HashMap采用这样的方式来计算Hash？
+  *HashMap为元素寻址的时候使用(n-1)&hash, 使用高16位来异或低16位，这样所得hash值中低16位中包含了	   *HashCode高16位的信息，可以有效减少碰撞
+  */
 static final int hash(Object key) {
     int h;
     return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
@@ -198,7 +202,9 @@ final Node<K,V>[] resize() {
       *1: 该节点为空，此时是不需要去迁移的。
       *2: 该节点没有后继节点，说明该节点是单节点，又因为hash&(length-1) = hash%length(证明见上)
       *所以直接将该节点存在 newTab[e.hash&newCap-1]的位置,此时e已经指向当前节点。
-      *3: 如果当前节点是一棵红黑树，直接将该节点插入红黑树（关于红黑树后续会再出一篇文章，这边不展开）
+      *3: 如果当前节点是一棵红黑树，HashMap定义了内部类TreeNode,包含prev和next属性
+      *这边处理方式跟链表类似使用 hash&oldCap 来生成高位链和低位链，如果生成的高低位链的冲突个数小于6
+      *需要将其退化为链表。                                                                
       *4: 最后一种情况是，当前节点是一个链表, HashMap这边选择rehash的方式来处理。
       *(方案是: 判断e.hash&oldCap是否为0)
       *那么HashMap为什么选择这种方法来rehash呢？
@@ -222,7 +228,7 @@ final Node<K,V>[] resize() {
                 if (e.next == null)
                     //运用e.hash&(newCap-1) == e.hash%newCap公式,当newCap是2的幂次的时候
                     newTab[e.hash & (newCap - 1)] = e;
-                //第三种情况，该节点是一颗红黑树(具体实现我们到红黑树那一篇再详谈)
+                //第三种情况，该节点是一颗红黑树
                 else if (e instanceof TreeNode)
                     ((TreeNode<K,V>)e).split(this, newTab, j, oldCap);
                 //第四种情况，该节点为链表结构
@@ -275,7 +281,61 @@ final Node<K,V>[] resize() {
     }
     return newTab;
 }
+//调用split方法拆分红黑树
+final void split(HashMap<K,V> map, Node<K,V>[] tab, int index, int bit) {
+            TreeNode<K,V> b = this;
+            // Relink into lo and hi lists, preserving order
+            //类似于高位链表、低位链表的处理方式
+            //loHead指向低位链的头节点，loTail指向低位链的尾节点
+            TreeNode<K,V> loHead = null, loTail = null;
+            TreeNode<K,V> hiHead = null, hiTail = null;
+            //高低位链的计数
+            int lc = 0, hc = 0;
+            //HashMap定义内部类TreeNode,带有prev,next属性，使用hash&cap来拆成高低位链
+            for (TreeNode<K,V> e = b, next; e != null; e = next) {
+                next = (TreeNode<K,V>)e.next;
+                e.next = null;
+                if ((e.hash & bit) == 0) {
+                    if ((e.prev = loTail) == null)
+                        loHead = e;
+                    else
+                        loTail.next = e;
+                    loTail = e;
+                    ++lc;
+                }
+                else {
+                    if ((e.prev = hiTail) == null)
+                        hiHead = e;
+                    else
+                        hiTail.next = e;
+                    hiTail = e;
+                    ++hc;
+                }
+            }
 
+            if (loHead !q= null) {
+                //区别于链表的处理方式，冲突个数小6的红黑树退化为链表
+                //低位链依旧存放在表格原index处
+                if (lc <= UNTREEIFY_THRESHOLD)
+                    tab[index] = loHead.untreeify(map);
+                else {
+                    tab[index] = loHead;
+                    if (hiHead != null) // (else is already treeified)
+                        loHead.treeify(tab);
+                }
+            }
+            if (hiHead != null) {
+                //区别于链表的处理方式，冲突个数小6的红黑树退化为链表
+                //高位链存放在表格原index+oldCap处
+                if (hc <= UNTREEIFY_THRESHOLD)
+                    tab[index + bit] = hiHead.untreeify(map);
+                else {
+                    tab[index + bit] = hiHead;
+                    if (loHead != null)
+                        hiHead.treeify(tab);
+                }
+            }
+        }
 
 
 
