@@ -4,7 +4,7 @@ CopyOnWriteArrayList这个类是位于JUC (java.util.concurrent)包下的线程�
 
 
 
-<img src="./CopyOnWriteArrayList.png" alt="CopyOnWriteArrayList" style="zoom:75%;" />
+<img src="../../resource/pictures/CopyOnWriteArrayList.png" alt="CopyOnWriteArrayList" style="zoom:75%;" />
 
 根据CopyOnWriteArrayList(以下简称COWArrayList)的名字，我们可以知道这个类跟ArrayList是有渊源的。通过族谱图，我们可以得知，COWArrayList同样实现了Serializable、Cloneable、RandomAccess、List接口，唯独没有继承AbstractList，我们可以先了解AbstractList的主要功能，以此来了解COWArrayList和ArrayList的区别，以及COWArrayList存在的意义。
 
@@ -18,9 +18,7 @@ CopyOnWriteArrayList这个类是位于JUC (java.util.concurrent)包下的线程�
 
 我们已经知道AbstractList是用来简化List接口的工作的，但是这句话讲出来还是很抽象。我们可以根据AbstractList的方法来看看它到底干嘛了。
 
-<img src="./AbstractList.png" alt="AbstractList" style="zoom:75%;" />
-
-
+<img src="../../resource/pictures/AbstractList.png" alt="AbstractList" style="zoom:75%;" />
 
 上图是摘自JDK关于AbstractList的内部方法，可见AbstractList实现了对于元素添加、修改、删除的基本方法，我们知道但凡涉及到元素的新增、修改、删除都需要考虑线程安全问题。而COWArrayList是JUC包下的类，所以是属于线程安全的集合，这就是为什么COWArrayList没有去继承AbstractList的原因。
 

@@ -1,6 +1,6 @@
 ## ArrayList源码分析
 
-<img src="./ArrayList.png" alt="hierarchy" style="zoom:80%;" />
+<img src="../../resource/pictures/ArrayList.png" alt="hierarchy" style="zoom:80%;" />
 
 
 

@@ -2,7 +2,7 @@
 
 关于HashSet大家平时接触的还是蛮多的，关于它的基本用途这边先不赘述，我们还是先上族谱图。
 
-<img src="./HashSet.png" alt="HashSet" style="zoom:75%;" />
+<img src="../../resource/pictures/HashSet.png" alt="HashSet" style="zoom:75%;" />
 
 看到族谱图的时候，HashSet还是给人有点似曾相识的感觉。实现Set接口、继承AbstractSet类，满足克隆、序列化等特性。AbstractSet相对于HashSet，就类似于AbstractList相对于ArrayList一样。都是都是对上层接口的基本骨架的实现，并且尽可能的简化后面继承类的工作。那我们先从Set接口关注起来。
 

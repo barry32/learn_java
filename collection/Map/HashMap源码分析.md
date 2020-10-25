@@ -2,7 +2,7 @@
 
 学过数据结构中散列表的同学，对于Hash应该不会陌生。本章我们一起来看HashMap，还是从先从族谱图看起。
 
-<img src="./HashMap.png" alt="HashMap" style="zoom:75%;" />
+<img src="../../resource/pictures/HashMap.png" alt="HashMap" style="zoom:75%;" />
 
 看过族谱图之后，我们可以知道HashMap除了满足可序列化、克隆的性质外，还继承了AbstractMap。AbtractMap相对于HashMap正如AbstractList相对于ArrayList一样，是对于Map的基本骨架的实现类，用来减少HashMap一部分工作的。
 

@@ -2,7 +2,7 @@
 
 在上一篇文章中我们一起学习了ArrayList核心方法的相关源码内容，现在我们继续探讨LinkedList底层实现。
 
-<img src="./LinkedList.png" alt="linkedList" style="zoom:75%;" />
+<img src="../../resource/pictures/LinkedList.png" alt="linkedList" style="zoom:75%;" />
 
 根据族谱图可以看出，LinkedList跟ArrayList一样都继承了AbstractCollection，而AbstractCollection实现了Collection的基本框架，LinkedList底层是双向链表实现的而不是数组，所以不再具备RandomAccess的特性。但是相比较ArrayList，LinkedList实现了一个叫做Deque的接口，Deque直接继承了Queue接口。Queue是一种后进先出的数据结构，我们可以把关注点放在Deque上。
 
