@@ -381,4 +381,80 @@ private ClassLoader(Void unused, ClassLoader parent) {
 
 我们在源代码中一直跟到最后面发现，实际上，就是将父类加载器作为参数传入再赋值给当前类加载器实例中的parent属性。
 
----------------------------------------待续-----------------------------（晚上回来继续写）
+<img src="../resource/pictures/JVM4_parent_delegation_model_graph.png" alt="JVM_sample" style="zoom:75%;" />
+
+<p align='center'>双亲委派模型</p>
+
+**为什么使用双亲委派？**
+
+* 避免出现类的重复加载，假设需要加载String类，没有双亲委派，这样`BoostrapClassLoader`已经加载了一次，这样子类也会加载一次。
+
+* 沙箱机制，当用户自己创建了相同的String类，因为有双亲委派的机制存在，会在`BootstrapClassLoader`这边直接返回类对象，避免Java核心API被修改。
+
+最后，我们手写一个类加载器来进行测试一下。
+
+```java
+public class MyClassLoader extends ClassLoader {
+
+    private String classPath;
+    public static final String FILE_TYPE = ".class";
+
+    public MyClassLoader(String classPath) {
+        this.classPath = classPath;
+    }
+   private byte[] loadByteArray(String name) {
+       byte[] arr = null;
+       name = name.replace(".","/");
+       try(ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+           FileInputStream fileInputStream = new FileInputStream(classPath+name+FILE_TYPE)) {
+           int len;
+           while(-1!=(len = fileInputStream.read())) {
+               outputStream.write(len);
+           }
+           arr = outputStream.toByteArray();
+       } catch (Exception e) {
+           e.printStackTrace();
+       }
+       return arr;
+   }
+    @Override
+    protected Class<?> findClass(String name) throws ClassNotFoundException {
+        byte[] b = loadByteArray(name);
+        return defineClass(name, b, 0, b.length);
+
+    }
+
+    public static void main(String[] args) {
+        MyClassLoader myClassLoader = new MyClassLoader("D:\\");
+        try {
+            Class<?> helloWorld = myClassLoader.findClass("HelloWorld");
+            helloWorld.newInstance();
+
+        } catch (ClassNotFoundException e) {
+            e.printStackTrace();
+
+        } catch (IllegalAccessException e) {
+            e.printStackTrace();
+        } catch (InstantiationException e) {
+            e.printStackTrace();
+        }
+    }
+
+}
+
+
+public class HelloWorld {
+
+    static {
+		System.out.println("loading HelloWorld!");
+		System.out.println("Done!");
+	}
+}
+```
+
+测试结果如下:
+
+<img src="../resource/pictures/JVM4_manual_class_loader.png" alt="JVM_sample" style="zoom:75%;" />
+
+
+
