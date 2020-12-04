@@ -170,6 +170,20 @@ CMS是针对老年代的。当我们使用`-XX:+UseConcMarkSweepGC`，JVM会对�
 
 总结一下: 从上图我们可以发现`-XX:+UseSerialGC`，将在年轻代使用Serial（Mark-Copy），在老年代使用Serial Old（Mark-Sweep-Compact），两者都是线性的，需要GC时触发STW应用线程挂起，然单线程完成GC。`-XX:+UseConcMarkSweepGC`,在年轻代使用ParNew(Mark-Copy)，老年代使用CMS(Mark-Sweep)在出现`Concurrent Mode Failure` ，采用备用的Serial Old（Mark-Sweep-Compact)，当出现GC时，对于Minor GC也是触发STW挂起应用线程，并行的去完成GC，对于Major GC，开始时触发STW 单线程进行Initial Mark，然后Concurrent Mark阶段包括后面的Concurrent Preclean和Concurrent Abortable Preclean，与应用线程一起执行，进行到Final Remark阶段，此时又是一次STW，此时会起多个线程并行完成remark阶段，之后Concurrent Sweep以及Concurrent Reset阶段，CMS垃圾回收器线程又会与应用线程一起运行。当我们使用`-XX:+UseParNewGC`, 实际上年轻代使用的是ParNew（Mark-Copy）,老年代使用的是Serial Old（Mark-Sweep-Compact），年轻代在GC的过程中会触发STW，然后并行完成Minor GC，老年代还是起单线程并且会触发STW，完成GC流程。`-XX:+UseParallelGC`垃圾回收器采用的组合时Parallel Scavenge和Serial Old。`-XX:+UseParallelOldGC`垃圾回收器采用的是Parallel Scavenge和Parallel Old组合，都是需要触发STW，然后并行的完成GC。
 
+**说明:**
+
+Serial 是不能和CMS一起连用的(`-XX:+UseConcMarkSweepGC`、`-XX:+UseSerialGC`)，特此说明。
+
+>3) How do I use "CMS" with "Serial"?
+>
+>`-XX:+UseConcMarkSweepGC` `-XX:-UseParNewGC`.
+>Don't use `-XX:+UseConcMarkSweepGC` and `-XX:+UseSerialGC`. Although that's seems like
+>a logical combination, it will result in a message saying something about
+>conflicting collector combinations and the JVM won't start. Sorry about that.
+>Our bad.
+
+[勘误链接](https://blogs.oracle.com/jonthecollector/our-collectors)
+
 -----
 
 周末完成G1，调优的内容，JVM将暂时告一段落。
