@@ -184,7 +184,7 @@ Serial 是不能和CMS一起连用的(`-XX:+UseConcMarkSweepGC`、`-XX:+UseSeria
 
 [勘误链接](https://blogs.oracle.com/jonthecollector/our-collectors)
 
------
+* G1垃圾收集器
 
-周末完成G1，调优的内容，JVM将暂时告一段落。
+（先空着，以后填坑。）
 
