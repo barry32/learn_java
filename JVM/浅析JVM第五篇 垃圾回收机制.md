@@ -53,7 +53,7 @@ GC Roots 是为垃圾收集器所特有的对象，并且垃圾收集器会收�
 
 > Mark-Sweep-Compact algorithms solve the shortcomings of Mark and Sweep by moving all marked – and thus alive – objects to the beginning of the memory region. The downside of this approach is an increased GC pause duration as we need to copy all objects to a new place and to update all references to such objects. The benefits to Mark and Sweep are also visible – after such a compacting operation new object allocation is again extremely cheap via pointer bumping. Using such approach the location of the free space is always known and no fragmentation issues are triggered either.
 
-标记整理算法通过移动所以被标记了的存活的对象到内存区域的一端来解决标记删除算法的缺点。但是，这种算法的缺点在于增加了GC 暂停时间（也就是STOP THE WORLD 在进行垃圾回收时会将应用线程挂起的形况，导致服务出现延时）由于我们需要复制所有存活的对象到一个新的地方并且来更新这些对象的引用。该方法的好处也是显而易见的，在进行整理操作之后，对于新对象的分配通过指针碰撞也会变得廉价(因为在标记整理算法走完之后，所有存活的对象都被整理到一端去了，所以如果出现需要开辟连续空间来存放对象的时候，也会变的更加的简单，内存占用也会更加紧凑)，使用这种方法，可用空间的位置也是已知的，也不会存在内存碎片的问题（当需要为一个数组或者大对象分配连续空间的时候，由于空间不够但是零零碎碎的所剩空间是大于该对象所需空间，依然会导致提前触发GC）。
+标记整理算法通过移动被标记了的存活的对象到内存区域的一端来解决标记删除算法的缺点。但是，这种算法的缺点在于增加了GC 暂停时间（也就是STOP THE WORLD 在进行垃圾回收时会将应用线程挂起的形况，导致服务出现延时）由于我们需要复制所有存活的对象到一个新的地方并且来更新这些对象的引用。该方法的好处也是显而易见的，在进行整理操作之后，对于新对象的分配通过指针碰撞也会变得廉价(因为在标记整理算法走完之后，所有存活的对象都被整理到一端去了，所以如果出现需要开辟连续空间来存放对象的时候，也会变的更加的简单，内存占用也会更加紧凑)，使用这种方法，可用空间的位置也是已知的，也不会存在内存碎片的问题（当需要为一个数组或者大对象分配连续空间的时候，由于空间不够但是零零碎碎的所剩空间是大于该对象所需空间，依然会导致提前触发GC）。
 
 <img src="../resource/pictures/JVM5_mark_compact_algorithm.png" alt="JVM_sample" style="zoom:75%;" />
 
@@ -84,7 +84,7 @@ GC Roots 是为垃圾收集器所特有的对象，并且垃圾收集器会收�
 
 * 空间分配担保
 
-当准备Minor GC时，JVM回去检查老年代剩余连续空间是否大于年轻代的对象总和或者历次平均晋升的空间大小，如果大于选择Minor GC，小于的话，转而进行Full GC，以此来避免当Minor GC 过后，晋升到Old 区域的对象比剩余空间大的时候，再次触发Major GC。
+当准备Minor GC时，JVM会去检查老年代剩余连续空间是否大于年轻代的对象总和或者历次平均晋升的空间大小，如果大于选择Minor GC，小于的话，转而进行Full GC，以此来避免当Minor GC 过后，晋升到Old 区域的对象比剩余空间大的时候，再次触发Major GC。
 
 **但是为什么需要空间担保？**
 

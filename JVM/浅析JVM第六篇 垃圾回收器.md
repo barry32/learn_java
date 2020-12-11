@@ -65,7 +65,7 @@
 2020-11-29T21:09:38.022+0800: 0.533: [GC (Allocation Failure) [PSYoungGen: 7663K->1023K(9216K)] 7663K->4103K(29696K), 0.0016500 secs] [Times: user=0.00 sys=0.00, real=0.00 secs] 
 ```
 
-`2020-11-29T21:09:38.022+0800: 0.533` 这边依旧指的是GC开始的时间且开始时间精确到秒。`GC (Allocation Failure)` 这边指的是Minor GC也就是Young GC，GC的原因是内存分配失败。`[PSYoungGen: 7663K->1023K(9216K)] 7663K->4103K(29696K), 0.0016500 secs] ` ， 首先PSYoungGen这边指的垃圾收集器的名字，全名是**Parallel Scavenge Young Generation* ，内存使用量由7663K变成1023K，年轻代的容量是9216k，整个堆的内存使用情况是7663K变成4103k，整个堆的容量是29696K。` [Times: user=0.00 sys=0.00, real=0.00 secs] ` 这边 GC的花费的CPU时间是0，OS调用时间是0，real此时应该是接近于user+sys再除以GC线程数。
+`2020-11-29T21:09:38.022+0800: 0.533` 这边依旧指的是GC开始的时间且开始时间精确到秒。`GC (Allocation Failure)` 这边指的是Minor GC也就是Young GC，GC的原因是内存分配失败。`[PSYoungGen: 7663K->1023K(9216K)] 7663K->4103K(29696K), 0.0016500 secs] ` ， 首先PSYoungGen这边指的垃圾收集器的名字，全名是*Parallel Scavenge Young Generation* ，内存使用量由7663K变成1023K，年轻代的容量是9216k，整个堆的内存使用情况是7663K变成4103k，整个堆的容量是29696K。` [Times: user=0.00 sys=0.00, real=0.00 secs] ` 这边 GC的花费的CPU时间是0，OS调用时间是0，real此时应该是接近于user+sys再除以GC线程数。
 
 我们再来看一个例子。
 
