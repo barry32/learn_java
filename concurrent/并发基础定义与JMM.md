@@ -79,9 +79,8 @@
 
 <img src="..\resource\pictures\concurrent\invalidate_queue.png" alt="invalidate_queue" style="zoom:75%;" />
 
-但是如果该消息存放在Invalidate Queue中，并直接返回`ACK`确认消息。当前CPU需要对该变量进行数据操作，但是此时CPU并不知道对应的Cache Line的状态其实应该是Invalid，需要到从RAM中重新加载该变量。那么由于这样的延时，就是再次出现问题。那么此时就需要**内存屏障**来解决这个问题，也就是需要等到Invalidate Queue中item最终应用到缓存中 ，也就是说需要等到缓存中对应的Cache Line的状态变成Invalid之后，才执行之后的操作。
+但是如果该消息存放在Invalidate Queue中，并直接返回`ACK`确认消息。当前CPU需要对该变量进行数据操作，但是此时CPU并不知道对应的Cache Line的状态其实应该是Invalid，需要到从RAM中重新加载该变量。那么由于这样的延时，就是再次出现问题。那么此时就需要**内存屏障**来解决这个问题，也就是需要等到Invalidate Queue中item最终应用到缓存中 ，也就是说需要等到缓存中对应的Cache Line的状态变成Invalid之后，才执行之后的操作。而JAVA对于内存屏障的指令进行了统一封装，对应的模型就是JAVA内存模型，也就是`JMM`。
 
-而JAVA对于内存屏障的指令进行了统一封装，对应的模型就是JAVA内存模型，也就是`JMM`。
 4. `JMM`
 
 `JMM`指定了不同线程之间如何以及何时可以看到其他线程写入的共享变量的值，以及如何确保同步访问这些共享变量。`JMM`规定了每一个运行在`JVM`中的线程拥有自己的工作空间，通常关于基本类型的变量存放在该工作空间，但是如果该基本类型是成员变量的情况下，将会存放在主内存中。此外，关于基本类型对应的对象以及其他引用类型都存放在主内存中。
