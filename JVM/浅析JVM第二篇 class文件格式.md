@@ -583,7 +583,7 @@ u1 bytes[length];
 
 length对应的字节数为 00 16 ，是为十进制中的22，向后读取22个字节*28 49 29 4c 6a 61 76 61 2f 6c 61 6e 67 2f 49 6e 74 65 67 65 72 3b*，转为字符串*(I)Ljava/lang/Integer;*
 
-到目前为止，常量池中43个常量已经手动读完了，我们使用***javap -verbose Student**来验证一下。
+到目前为止，常量池中43个常量已经手动读完了，我们使用**javap -verbose Student**来验证一下。
 
 <img src="../resource/pictures/javap_verbose_info.png" alt="javap -verbose" style="zoom:75%;" />
 
