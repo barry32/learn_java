@@ -153,10 +153,9 @@ class ObjectWaiter : public StackObj {
 void ATTR ObjectMonitor::enter(TRAPS) {
   Thread * const Self = THREAD ;
   void * cur ;
-  /**
-    *这边使用的是CAS算法，简单介绍一下。在CAS中有三个值，exchange_value、dest、compare_value，将dest     *和compare_value进行对比。如果相等，则将exchange_value赋值给dest，函数返回compare_value。如果不     *相等，dest不作更改，函数则返回dest。
-    */
-  //此处Self、&_owner、NULL分别对应 exchange_value、dest、compare_value
+  //这边使用的是CAS算法，简单介绍一下。在CAS中有三个值，exchange_value、dest、compare_value，将dest   //和compare_value进行对比。如果相等，则将exchange_value赋值给dest，函数返回compare_value。如果不
+  //相等，dest不作更改，函数则返回dest。 此处Self、&_owner、NULL分别对应 exchange_value、dest、	
+  //compare_value
   cur = Atomic::cmpxchg_ptr (Self, &_owner, NULL) ;
   //如果cur等于NULL，则表明当前线程已经获取到Monitor锁，并将_owner 指向当前线程  
   if (cur == NULL) {
@@ -170,10 +169,9 @@ void ATTR ObjectMonitor::enter(TRAPS) {
      _recursions ++ ;
      return ;
   }
-  /**
-   *需要先补充一下知识点，当只有一个线程访问共享资源，会从无锁膨胀为偏向锁。线程交替访问共享资源时，此时偏向锁
-   *会膨胀成轻量级锁。会将当前对象的Mark Word复制到线程的栈帧上，而该位置被称为Lock Record，并且	      *MarkWord上有指针指向Lock Record。另外当 线程进入Monitor.enter 方法之前，Monitor对象已经初始化完    *成了。如果是轻量级锁膨胀为重量级锁，此时会初始化Monitor对象，并将Owner设置为线程的Lock Record。查看	*src/share/vm/runtime/synchronizer.cpp:1368所以如果是轻量级锁第一次膨胀为重量级锁，此时owner仍    *旧指向的是Lock Record。_recursions置为1，owner指向当前线程，OwnerIsThread = 1表示当前是轻量级锁    *膨胀为重量级锁的情况。
-   */
+  //需要先补充一下知识点，当只有一个线程访问共享资源，会从无锁膨胀为偏向锁。线程交替访问共享资源时，此时偏向锁
+  //会膨胀成轻量级锁。会将当前对象的Mark Word复制到线程的栈帧上，而该位置被称为Lock Record，并且
+  //MarkWord上有指针指向Lock Record。另外当 线程进入Monitor.enter 方法之前，Monitor对象已经初始化完   //成了。如果是轻量级锁膨胀为重量级锁，此时会初始化Monitor对象，并将Owner设置为线程的Lock Record。查看   //src/share/vm/runtime/synchronizer.cpp:1368所以如果是轻量级锁第一次膨胀为重量级锁，此时owner仍   //旧指向的是Lock Record。_recursions置为1，owner指向当前线程，OwnerIsThread = 1表示当前是轻量级锁   //膨胀为重量级锁的情况。
   if (Self->is_lock_owned ((address)cur)) {
     assert (_recursions == 0, "internal state error");
     _recursions = 1 ;
@@ -309,16 +307,14 @@ void ATTR ObjectMonitor::EnterI (TRAPS) {
     //nxt变量指向_cxq,也就是ContentionList
     ObjectWaiter * nxt ;
     for (;;) {
-        /**
-          *使用头插法的方式，将当前线程放置在_cxq的头部，将当前节点next指向_cxq, 但是此处并没有将nxt的		   *pre指向node，形成双向链表。这是一个细节，先抛个问题在这里，我们等到下文再来解释。
-          */
+        //使用头插法的方式，将当前线程放置在_cxq的头部，将当前节点next指向_cxq, 但是此处并没有将nxt的
+        //pre指向node，形成双向链表。这是一个细节，先抛个问题在这里，我们等到下文再来解释。
         node._next = nxt = _cxq ;
         //使用CAS的方式让_cxq指向最新的队首-- 当前节点。
         if (Atomic::cmpxchg_ptr (&node, &_cxq, nxt) == nxt) break ;
 
-        /**
-          *代码能够执行到这里，说明_cxq当前没有指向nxt，也就是_cxq发生了变化，说明期间_cxq队列有其他节点           *使用了头插法进入该队列。此处再次尝试获取锁。
-          */
+        //代码能够执行到这里，说明_cxq当前没有指向nxt，也就是_cxq发生了变化，说明期间_cxq队列有其他节点 
+        //使用了头插法进入该队列。此处再次尝试获取锁。
         if (TryLock (Self) > 0) {
             assert (_succ != Self         , "invariant") ;
             assert (_owner == Self        , "invariant") ;
@@ -326,12 +322,11 @@ void ATTR ObjectMonitor::EnterI (TRAPS) {
             return ;
         }
     }
-
-    /**
-      *nxt为空或者_EntryList为空 都比较好理解，这表明当前线程是第一个获取Monitor锁没有成功，换句话说是第	    *一个等待Monitor锁释放的线程，尝试使用CAS方式将_Responsible指向当前线程。SyncFlags 是HotSpot定       *义在src/share/vm/runtime/globals.hpp:1168 的一个同步标志。表示实验性的同步标志，默认值为0，所	   *以，下面if等同于只要判断 nxt为空或者_EntryList为空 
-      * 参考相关代码：
-      * product(intx, SyncFlags, 0, "(Unsafe, Unstable) Experimental Sync flags")
-      */
+    //nxt为空或者_EntryList为空 都比较好理解，这表明当前线程是第一个获取Monitor锁没有成功，换句话说是第
+    //一个等待Monitor锁释放的线程，尝试使用CAS方式将_Responsible指向当前线程。SyncFlags 是HotSpot定
+    //义在src/share/vm/runtime/globals.hpp:1168 的一个同步标志。表示实验性的同步标志，默认值为0，所
+    //以，下面if等同于只要判断 nxt为空或者_EntryList为空，参考相关代码：
+    //product(intx, SyncFlags, 0, "(Unsafe, Unstable) Experimental Sync flags")
     if ((SyncFlags & 16) == 0 && nxt == NULL && _EntryList == NULL) {
         Atomic::cmpxchg_ptr (Self, &_Responsible, NULL) ;
     }
@@ -348,10 +343,9 @@ void ATTR ObjectMonitor::EnterI (TRAPS) {
         if ((SyncFlags & 2) && _Responsible == NULL) {
            Atomic::cmpxchg_ptr (Self, &_Responsible, NULL) ;
         }
-
-        /**
-          * 当前_Responsible指向的是第一个等待获取Monitor锁的线程，RecheckInterval初始值为1，以后每		   * 次会乘以8，而它的上限为1000，park()来实现线程的阻塞。连起来的理解意思是，第一个等待Monitor			  * 锁的线程，会按照1，8，64 ... 1000,1000.. 这样的时间间隔来尝试获取锁。
-          */
+        //当前_Responsible指向的是第一个等待获取Monitor锁的线程，RecheckInterval初始值为1，以后每
+        //次会乘以8，而它的上限为1000，park()来实现线程的阻塞。连起来的理解意思是，第一个等待Monitor
+        //锁的线程，会按照1，8，64 ... 1000,1000.. 这样的时间间隔来尝试获取锁。
         if (_Responsible == Self || (SyncFlags & 1)) {
             TEVENT (Inflated enter - park TIMED) ;
             Self->_ParkEvent->park ((jlong) RecheckInterval) ;
@@ -417,9 +411,9 @@ void ATTR ObjectMonitor::EnterI (TRAPS) {
 ```java
 void ATTR ObjectMonitor::exit(bool not_suspended, TRAPS) {
    Thread * Self = THREAD ;
-   /**
-   	 *看到这行代码可能会有些疑惑，但如果是当前线程访问共享资源并且是轻量级锁的情况，且后来因为竞争膨胀为重量	  *级锁，而在当时会对ObjectMonitor对象进行初始化，将_owner指向当前线程栈上Lock Record，所以会出现这	   *种情况。相关代码行参照src/share/vm/runtime/synchronizer.cpp:1368
-   	 */ 
+   //看到这行代码可能会有些疑惑，但如果是当前线程访问共享资源并且是轻量级锁的情况，且后来因为竞争膨胀为重量
+   //级锁，而在当时会对ObjectMonitor对象进行初始化，将_owner指向当前线程栈上Lock Record，所以会出现这
+   //种情况。相关代码行参照src/share/vm/runtime/synchronizer.cpp:1368
    if (THREAD != _owner) {
      if (THREAD->is_lock_owned((address) _owner)) {
        //此时将_owner指向当前线程，OwnerIsThread标志为1，表示当前是轻量级锁膨胀为重量级锁的情况。
@@ -428,9 +422,8 @@ void ATTR ObjectMonitor::exit(bool not_suspended, TRAPS) {
        _recursions = 0 ;
        OwnerIsThread = 1 ;
      } else {
-      /**
-       	*不是轻量级锁膨胀的情况且_owner没有指向当前线程，再加上Monitor进出次数不平衡，自然会排除线程重入			*的情况，此时抛出异常的方式来处理。
-       	*/
+       //不是轻量级锁膨胀的情况且_owner没有指向当前线程，再加上Monitor进出次数不平衡，自然会排除线程重入	
+       //的情况，此时抛出异常的方式来处理。
        TEVENT (Exit - Throw IMSX) ;
        assert(false, "Non-balanced monitor enter/exit!");
        if (false) {
@@ -460,9 +453,10 @@ void ATTR ObjectMonitor::exit(bool not_suspended, TRAPS) {
    for (;;) {
       assert (THREAD == _owner, "invariant") ;
 
-	  /**
-	    *Knob_ExitPolicy 默认为0，参照src/share/vm/runtime/objectMonitor.cpp:177，此处涉及到俩		 *种策略，当前情况为：首先释放Monitor锁，也就是将_owner置为空，然后查看_EntryList和_cxq链表里是		  *否为空或者存在假定继承人，直接返回。不满足条件仍需将_owner暂时指向当前线程，为后续执行相应的出队策		   *略做准备。
-	    */
+      //Knob_ExitPolicy 默认为0，参照src/share/vm/runtime/objectMonitor.cpp:177，此处涉及到俩
+      //种策略，当前情况为：首先释放Monitor锁，也就是将_owner置为空，然后查看_EntryList和_cxq链表里是
+      //否为空或者存在假定继承人，直接返回。不满足条件仍需将_owner暂时指向当前线程，为后续执行相应的出队策
+      //略做准备。
       if (Knob_ExitPolicy == 0) {
          OrderAccess::release_store_ptr (&_owner, NULL) ;
          OrderAccess::storeload() ;
@@ -476,9 +470,8 @@ void ATTR ObjectMonitor::exit(bool not_suspended, TRAPS) {
          }
          TEVENT (Exit - Reacquired) ;
       } else {
-         /**
-           *第二种策略是满足_EntryList和_cxq链表里为空或者存在假定继承人的条件，此时释放Monitor锁才具有		   *意义。
-           */
+         //第二种策略是满足_EntryList和_cxq链表里为空或者存在假定继承人的条件，此时释放Monitor锁才具有
+         //意义。
          if ((intptr_t(_EntryList)|intptr_t(_cxq)) == 0 || _succ != NULL) {
             OrderAccess::release_store_ptr (&_owner, NULL) ;
             OrderAccess::storeload() ;
@@ -511,9 +504,8 @@ void ATTR ObjectMonitor::exit(bool not_suspended, TRAPS) {
       }
       //QMode为3，将_cxq链表中的元素状态由TS_CXQ变更为TS_ENTER，并追加到_EntryList链表后
       if (QMode == 3 && _cxq != NULL) {
-          /**
-            *尝试将w指向_xcq所指向的对象，并使用CAS的方式将_cxq置为NULL，如果失败。则说明已经使用了头插			  *法，也就是说存在新的线程尝试调用enter()方法获取Monitor锁。
-            */
+          //尝试将w指向_xcq所指向的对象，并使用CAS的方式将_cxq置为NULL，如果失败。则说明已经使用了头插
+          //法，也就是说存在新的线程尝试调用enter()方法获取Monitor锁。
           w = _cxq ;
           for (;;) {
              assert (w != NULL, "Invariant") ;
@@ -522,10 +514,9 @@ void ATTR ObjectMonitor::exit(bool not_suspended, TRAPS) {
              w = u ;
           }
           assert (w != NULL              , "invariant") ;
-          /**
-            *指针p从_cxq链表的头部开始遍历，指针q则指向_cxq中已经完成状态更新的最后一个。在这里_cxq链表			 *中的状态字段未TS_CXQ，而_EntryList链表中的状态为TS_ENTER。也就是说，这里是在为_cxq链表中
-            *的元素迁移到_EntryList链表中做准备，而在此前_cxq指针已经重置为NULL。
-            */
+          //指针p从_cxq链表的头部开始遍历，指针q则指向_cxq中已经完成状态更新的最后一个。在这里_cxq链表
+          //中的状态字段未TS_CXQ，而_EntryList链表中的状态为TS_ENTER。也就是说，这里是在为_cxq链表中
+          //的元素迁移到_EntryList链表中做准备，而在此前_cxq指针已经重置为NULL。
           ObjectWaiter * q = NULL ;
           ObjectWaiter * p ;
           for (p = w ; p != NULL ; p = p->_next) {
@@ -535,9 +526,7 @@ void ATTR ObjectMonitor::exit(bool not_suspended, TRAPS) {
               q = p ;
           }
 
-          /**
-            *使用tail指针指向_EntryList的链表尾部节点，并将w指向的_cxq链表追加到_EntryList链表之后
-            */
+          //使用tail指针指向_EntryList的链表尾部节点，并将w指向的_cxq链表追加到_EntryList链表之后
           ObjectWaiter * Tail ;
           for (Tail = _EntryList ; Tail != NULL && Tail->_next != NULL ; Tail = Tail->_next) ;
           if (Tail == NULL) {
@@ -550,10 +539,8 @@ void ATTR ObjectMonitor::exit(bool not_suspended, TRAPS) {
       //QMode = 4，在这里_cxq和_EntryList的合并策略是将_cxq放到_EntryList链表之前。
       if (QMode == 4 && _cxq != NULL) {
           w = _cxq ;
-          /**
-            *首先将w指向_cxq指向的链表，使用CAS的方式，将_cxq指向NULL。防止_cxq在此过程中发生变更，也就			*是存在新的线程尝试获取Monitor锁，最后导致头插法插入_cxq。
-            *
-            */
+          //首先将w指向_cxq指向的链表，使用CAS的方式，将_cxq指向NULL。防止_cxq在此过程中发生变更，也就
+          //是存在新的线程尝试获取Monitor锁，最后导致头插法插入_cxq。
           for (;;) {
              assert (w != NULL, "Invariant") ;
              ObjectWaiter * u = (ObjectWaiter *) Atomic::cmpxchg_ptr (NULL, &_cxq, w) ;
@@ -586,9 +573,8 @@ void ATTR ObjectMonitor::exit(bool not_suspended, TRAPS) {
           ExitEpilog (Self, w) ;
           return ;
       }
-      /**
-        *代码能走到这个位置，说明_EntryList已经为空，若w指向的_cxq也为空，此时进行下一次for循环，若			*执行到exit()的顶部代码，两个链表均为空，会指向相应的退出流程。
-        */
+       //代码能走到这个位置，说明_EntryList已经为空，若w指向的_cxq也为空，此时进行下一次for循环，若	
+       //执行到exit()的顶部代码，两个链表均为空，会指向相应的退出流程。
       w = _cxq ;
       if (w == NULL) continue ;
 
@@ -604,10 +590,11 @@ void ATTR ObjectMonitor::exit(bool not_suspended, TRAPS) {
       assert (w != NULL              , "invariant") ;
       assert (_EntryList  == NULL    , "invariant") ;
 
-      /**
-        *QMode为1，此处将会按个遍历_cxq链表中的节点，t指向当前节点，u指向下一个节点，s指向已操作完成的最			*后一个节点。然后将t的前驱指向t的下一个节点也就是u，然后将t的后继指向t的前一个节点。此处为_cxq的逆		  *序。如果结合上下文一起看就会发现，当线程尝试获取Monitor锁的时候，使用头插法将当前线程封装为			*ObjectWaiter的节点插入到_cxq链表中，但是在此处使用逆序的方式，所以这就使得QMode为1的情况变成了
-        *先进先出的策略。
-        */
+       //QMode为1，此处将会按个遍历_cxq链表中的节点，t指向当前节点，u指向下一个节点，s指向已操作完成的最
+       //后一个节点。然后将t的前驱指向t的下一个节点也就是u，然后将t的后继指向t的前一个节点。此处为_cxq的逆
+       //序。如果结合上下文一起看就会发现，当线程尝试获取Monitor锁的时候，使用头插法将当前线程封装为
+       //ObjectWaiter的节点插入到_cxq链表中，但是在此处使用逆序的方式，所以这就使得QMode为1的情况变成了
+       //先进先出的策略。
       if (QMode == 1) {
          ObjectWaiter * s = NULL ;
          ObjectWaiter * t = w ;
@@ -624,12 +611,13 @@ void ATTR ObjectMonitor::exit(bool not_suspended, TRAPS) {
          _EntryList  = s ;
          assert (s != NULL, "invariant") ;
       } else {
-         /**
-           *这边的代码虽然只有一点，但是确实相当关键的。因为QMode获取的值默认为0，那么在策略0中，当线程调			 *用exit()方法准备释放Monitor锁的时候，首先会去唤醒_EntryList中的线程，而等到代码执行到这个
-           *地方，_EntryList为空，_EntryList将会重新指向原来_cxq指向的链表。另外我们再来回顾之前我们在
-           *enter()方法中，当当前线程作为一个ObjectWaiter节点使用头插法插入到_cxq链表中，将当前线程的		   *的后继指向_cxq,并没有将_cxq的前驱指向当前线程节点，就直接更新了_cxq指针。但是在此处，就会发现
-           *由于_EntryList链表已经为空，所以将_EntryList指向w也就是原来_cxq的链表，除了将链表中的元素			*的状态变成TS_ENTER之外，还将当前节点的前驱指向上一个节点，最终形成双向链表。
-           */
+          //这边的代码虽然只有一点，但是确实相当关键的。因为QMode获取的值默认为0，那么在策略0中，当线程调
+          //用exit()方法准备释放Monitor锁的时候，首先会去唤醒_EntryList中的线程，而等到代码执行到这个
+          //地方，_EntryList为空，_EntryList将会重新指向原来_cxq指向的链表。另外我们再来回顾之前我们在
+          //enter()方法中，当当前线程作为一个ObjectWaiter节点使用头插法插入到_cxq链表中，将当前线程的
+          //的后继指向_cxq,并没有将_cxq的前驱指向当前线程节点，就直接更新了_cxq指针。但是在此处，就会发现
+          //由于_EntryList链表已经为空，所以将_EntryList指向w也就是原来_cxq的链表，除了将链表中的元素
+         //的状态变成TS_ENTER之外，还将当前节点的前驱指向上一个节点，最终形成双向链表。
          _EntryList = w ;
          ObjectWaiter * q = NULL ;
          ObjectWaiter * p ;
@@ -655,12 +643,10 @@ void ATTR ObjectMonitor::exit(bool not_suspended, TRAPS) {
 为了加深理解，我们再来看`ObjectMonitor::ExitEpilog (Thread * Self, ObjectWaiter * Wakee)`方法，
 
 ```c++
-  /**
-    * 这边的代码比较简单，首先_succ假定继承人指向传入的节点，这个我们可以理解。之后释放Monitor锁，也就是将
-    * _owner指向NULL。然后调用了unpack()方法来唤醒当前线程，线程也就会从当时调用park()方法处被唤醒，
-    *之后该线程会去尝试获取Monitor锁，继续执行以后的代码，而当该线程拿到Monitor锁之后，然后再调用
-    *ObjectMonitor::UnlinkAfterAcquire方法，将当前线程节点从链表中解绑。
-    */
+//这边的代码比较简单，首先_succ假定继承人指向传入的节点，这个我们可以理解。之后释放Monitor锁，也就是将
+// _owner指向NULL。然后调用了unpack()方法来唤醒当前线程，线程也就会从当时调用park()方法处被唤醒，
+//之后该线程会去尝试获取Monitor锁，继续执行以后的代码，而当该线程拿到Monitor锁之后，然后再调用
+//ObjectMonitor::UnlinkAfterAcquire方法，将当前线程节点从链表中解绑。
 void ObjectMonitor::ExitEpilog (Thread * Self, ObjectWaiter * Wakee) {
    assert (_owner == Self, "invariant") ;
    _succ = Knob_SuccEnabled ? Wakee->_thread : NULL ;
