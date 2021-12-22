@@ -412,4 +412,289 @@ void ATTR ObjectMonitor::EnterI (TRAPS) {
 
 <img src="../resource/pictures/concurrent/monitor_enter.png" style="zoom:100%;" />
 
-现在我们一起来了解`ObjectMonitor::exit`,
+现在我们一起来了解`ObjectMonitor::exit`， 我们先找到对应的行数`src/share/vm/runtime/objectMonitor.cpp:962`
+
+```java
+void ATTR ObjectMonitor::exit(bool not_suspended, TRAPS) {
+   Thread * Self = THREAD ;
+   /**
+   	 *看到这行代码可能会有些疑惑，但如果是当前线程访问共享资源并且是轻量级锁的情况，且后来因为竞争膨胀为重量	  *级锁，而在当时会对ObjectMonitor对象进行初始化，将_owner指向当前线程栈上Lock Record，所以会出现这	   *种情况。相关代码行参照src/share/vm/runtime/synchronizer.cpp:1368
+   	 */ 
+   if (THREAD != _owner) {
+     if (THREAD->is_lock_owned((address) _owner)) {
+       //此时将_owner指向当前线程，OwnerIsThread标志为1，表示当前是轻量级锁膨胀为重量级锁的情况。
+       assert (_recursions == 0, "invariant") ;
+       _owner = THREAD ;
+       _recursions = 0 ;
+       OwnerIsThread = 1 ;
+     } else {
+      /**
+       	*不是轻量级锁膨胀的情况且_owner没有指向当前线程，再加上Monitor进出次数不平衡，自然会排除线程重入			*的情况，此时抛出异常的方式来处理。
+       	*/
+       TEVENT (Exit - Throw IMSX) ;
+       assert(false, "Non-balanced monitor enter/exit!");
+       if (false) {
+          THROW(vmSymbols::java_lang_IllegalMonitorStateException());
+       }
+       return;
+     }
+   }
+   //当前为线程重入情况，在enter()方法的时候_recursions++，此处正好对应。
+   if (_recursions != 0) {
+     _recursions--; 
+     TEVENT (Inflated exit - recursive) ;
+     return ;
+   }
+
+   //SyncFlags默认为0，重置_Responsible，关于_succ假定继承人的选择涉及到后续的出队的策略
+   if ((SyncFlags & 4) == 0) {
+      _Responsible = NULL ;
+   }
+//当前线程即将释放Monitor锁，将当前线程设置为_owner的上一任所有者
+#if INCLUDE_JFR
+   if (not_suspended && EventJavaMonitorEnter::is_enabled()) {
+    _previous_owner_tid = JFR_THREAD_ID(Self);
+   }
+#endif
+
+   for (;;) {
+      assert (THREAD == _owner, "invariant") ;
+
+	  /**
+	    *Knob_ExitPolicy 默认为0，参照src/share/vm/runtime/objectMonitor.cpp:177，此处涉及到俩		 *种策略，当前情况为：首先释放Monitor锁，也就是将_owner置为空，然后查看_EntryList和_cxq链表里是		  *否为空或者存在假定继承人，直接返回。不满足条件仍需将_owner暂时指向当前线程，为后续执行相应的出队策		   *略做准备。
+	    */
+      if (Knob_ExitPolicy == 0) {
+         OrderAccess::release_store_ptr (&_owner, NULL) ;
+         OrderAccess::storeload() ;
+         if ((intptr_t(_EntryList)|intptr_t(_cxq)) == 0 || _succ != NULL) {
+            TEVENT (Inflated exit - simple egress) ;
+            return ;
+         }
+         TEVENT (Inflated exit - complex egress) ;
+         if (Atomic::cmpxchg_ptr (THREAD, &_owner, NULL) != NULL) {
+            return ;
+         }
+         TEVENT (Exit - Reacquired) ;
+      } else {
+         /**
+           *第二种策略是满足_EntryList和_cxq链表里为空或者存在假定继承人的条件，此时释放Monitor锁才具有		   *意义。
+           */
+         if ((intptr_t(_EntryList)|intptr_t(_cxq)) == 0 || _succ != NULL) {
+            OrderAccess::release_store_ptr (&_owner, NULL) ;
+            OrderAccess::storeload() ;
+            if (_cxq == NULL || _succ != NULL) {
+                TEVENT (Inflated exit - simple egress) ;
+                return ;
+            }
+            if (Atomic::cmpxchg_ptr (THREAD, &_owner, NULL) != NULL) {
+               TEVENT (Inflated exit - reacquired succeeded) ;
+               return ;
+            }
+            TEVENT (Inflated exit - reacquired failed) ;
+         } else {
+            TEVENT (Inflated exit - complex egress) ;
+         }
+      }
+
+      guarantee (_owner == THREAD, "invariant") ;
+      //这边是核心代码逻辑，Knob_QMode默认值为0，该策略作用于_cxq、_EntryList，共分为5个策略。
+      ObjectWaiter * w = NULL ;
+      int QMode = Knob_QMode ;
+      //QMode为2，此时_cxq指向的链表中的线程相比_EntryList具有更高的优先级。
+      if (QMode == 2 && _cxq != NULL) {
+          w = _cxq ;
+          assert (w != NULL, "invariant") ;
+          assert (w->TState == ObjectWaiter::TS_CXQ, "Invariant") ;
+          //释放队首元素，确切来说是唤醒队首元素。
+          ExitEpilog (Self, w) ;
+          return ;
+      }
+      //QMode为3，将_cxq链表中的元素状态由TS_CXQ变更为TS_ENTER，并追加到_EntryList链表后
+      if (QMode == 3 && _cxq != NULL) {
+          /**
+            *尝试将w指向_xcq所指向的对象，并使用CAS的方式将_cxq置为NULL，如果失败。则说明已经使用了头插			  *法，也就是说存在新的线程尝试调用enter()方法获取Monitor锁。
+            */
+          w = _cxq ;
+          for (;;) {
+             assert (w != NULL, "Invariant") ;
+             ObjectWaiter * u = (ObjectWaiter *) Atomic::cmpxchg_ptr (NULL, &_cxq, w) ;
+             if (u == w) break ;
+             w = u ;
+          }
+          assert (w != NULL              , "invariant") ;
+          /**
+            *指针p从_cxq链表的头部开始遍历，指针q则指向_cxq中已经完成状态更新的最后一个。在这里_cxq链表			 *中的状态字段未TS_CXQ，而_EntryList链表中的状态为TS_ENTER。也就是说，这里是在为_cxq链表中
+            *的元素迁移到_EntryList链表中做准备，而在此前_cxq指针已经重置为NULL。
+            */
+          ObjectWaiter * q = NULL ;
+          ObjectWaiter * p ;
+          for (p = w ; p != NULL ; p = p->_next) {
+              guarantee (p->TState == ObjectWaiter::TS_CXQ, "Invariant") ;
+              p->TState = ObjectWaiter::TS_ENTER ;
+              p->_prev = q ;
+              q = p ;
+          }
+
+          /**
+            *使用tail指针指向_EntryList的链表尾部节点，并将w指向的_cxq链表追加到_EntryList链表之后
+            */
+          ObjectWaiter * Tail ;
+          for (Tail = _EntryList ; Tail != NULL && Tail->_next != NULL ; Tail = Tail->_next) ;
+          if (Tail == NULL) {
+              _EntryList = w ;
+          } else {
+              Tail->_next = w ;
+              w->_prev = Tail ;
+          }
+      }
+      //QMode = 4，在这里_cxq和_EntryList的合并策略是将_cxq放到_EntryList链表之前。
+      if (QMode == 4 && _cxq != NULL) {
+          w = _cxq ;
+          /**
+            *首先将w指向_cxq指向的链表，使用CAS的方式，将_cxq指向NULL。防止_cxq在此过程中发生变更，也就			*是存在新的线程尝试获取Monitor锁，最后导致头插法插入_cxq。
+            *
+            */
+          for (;;) {
+             assert (w != NULL, "Invariant") ;
+             ObjectWaiter * u = (ObjectWaiter *) Atomic::cmpxchg_ptr (NULL, &_cxq, w) ;
+             if (u == w) break ;
+             w = u ;
+          }
+          assert (w != NULL              , "invariant") ;
+
+          ObjectWaiter * q = NULL ;
+          ObjectWaiter * p ;
+          //将原_cxq链表中的元素状态赋值为TS_ENTER，为_cxq和_EntryList的合并做准备。
+          for (p = w ; p != NULL ; p = p->_next) {
+              guarantee (p->TState == ObjectWaiter::TS_CXQ, "Invariant") ;
+              p->TState = ObjectWaiter::TS_ENTER ;
+              p->_prev = q ;
+              q = p ;
+          }
+
+          //将_EntryList链表追加到w指向的原来_cxq链表
+          if (_EntryList != NULL) {
+              q->_next = _EntryList ;
+              _EntryList->_prev = q ;
+          }
+          _EntryList = w ;
+      }
+      //w重新指向_EntryList,并尝试唤醒_EntryList的链表首位节点
+      w = _EntryList  ;
+      if (w != NULL) {
+          assert (w->TState == ObjectWaiter::TS_ENTER, "invariant") ;
+          ExitEpilog (Self, w) ;
+          return ;
+      }
+      /**
+        *代码能走到这个位置，说明_EntryList已经为空，若w指向的_cxq也为空，此时进行下一次for循环，若			*执行到exit()的顶部代码，两个链表均为空，会指向相应的退出流程。
+        */
+      w = _cxq ;
+      if (w == NULL) continue ;
+
+      //代码走到这里，说明当前_EntryList为空，_cxq不为空，此时使用CAS的方式将_cxq置为NULL
+      for (;;) {
+          assert (w != NULL, "Invariant") ;
+          ObjectWaiter * u = (ObjectWaiter *) Atomic::cmpxchg_ptr (NULL, &_cxq, w) ;
+          if (u == w) break ;
+          w = u ;
+      }
+      TEVENT (Inflated exit - drain cxq into EntryList) ;
+
+      assert (w != NULL              , "invariant") ;
+      assert (_EntryList  == NULL    , "invariant") ;
+
+      /**
+        *QMode为1，此处将会按个遍历_cxq链表中的节点，t指向当前节点，u指向下一个节点，s指向已操作完成的最			*后一个节点。然后将t的前驱指向t的下一个节点也就是u，然后将t的后继指向t的前一个节点。此处为_cxq的逆		  *序。如果结合上下文一起看就会发现，当线程尝试获取Monitor锁的时候，使用头插法将当前线程封装为			*ObjectWaiter的节点插入到_cxq链表中，但是在此处使用逆序的方式，所以这就使得QMode为1的情况变成了
+        *先进先出的策略。
+        */
+      if (QMode == 1) {
+         ObjectWaiter * s = NULL ;
+         ObjectWaiter * t = w ;
+         ObjectWaiter * u = NULL ;
+         while (t != NULL) {
+             guarantee (t->TState == ObjectWaiter::TS_CXQ, "invariant") ;
+             t->TState = ObjectWaiter::TS_ENTER ;
+             u = t->_next ;
+             t->_prev = u ;
+             t->_next = s ;
+             s = t;
+             t = u ;
+         }
+         _EntryList  = s ;
+         assert (s != NULL, "invariant") ;
+      } else {
+         /**
+           *这边的代码虽然只有一点，但是确实相当关键的。因为QMode获取的值默认为0，那么在策略0中，当线程调			 *用exit()方法准备释放Monitor锁的时候，首先会去唤醒_EntryList中的线程，而等到代码执行到这个
+           *地方，_EntryList为空，_EntryList将会重新指向原来_cxq指向的链表。另外我们再来回顾之前我们在
+           *enter()方法中，当当前线程作为一个ObjectWaiter节点使用头插法插入到_cxq链表中，将当前线程的		   *的后继指向_cxq,并没有将_cxq的前驱指向当前线程节点，就直接更新了_cxq指针。但是在此处，就会发现
+           *由于_EntryList链表已经为空，所以将_EntryList指向w也就是原来_cxq的链表，除了将链表中的元素			*的状态变成TS_ENTER之外，还将当前节点的前驱指向上一个节点，最终形成双向链表。
+           */
+         _EntryList = w ;
+         ObjectWaiter * q = NULL ;
+         ObjectWaiter * p ;
+         for (p = w ; p != NULL ; p = p->_next) {
+             guarantee (p->TState == ObjectWaiter::TS_CXQ, "Invariant") ;
+             p->TState = ObjectWaiter::TS_ENTER ;
+             p->_prev = q ;
+             q = p ;
+         }
+      }
+      if (_succ != NULL) continue;
+      //此处唤醒w指向的队头节点
+      w = _EntryList  ;
+      if (w != NULL) {
+          guarantee (w->TState == ObjectWaiter::TS_ENTER, "invariant") ;
+          ExitEpilog (Self, w) ;
+          return ;
+      }
+   }
+}
+```
+
+为了加深理解，我们再来看`ObjectMonitor::ExitEpilog (Thread * Self, ObjectWaiter * Wakee)`方法，
+
+```c++
+  /**
+    * 这边的代码比较简单，首先_succ假定继承人指向传入的节点，这个我们可以理解。之后释放Monitor锁，也就是将
+    * _owner指向NULL。然后调用了unpack()方法来唤醒当前线程，线程也就会从当时调用park()方法处被唤醒，
+    *之后该线程会去尝试获取Monitor锁，继续执行以后的代码，而当该线程拿到Monitor锁之后，然后再调用
+    *ObjectMonitor::UnlinkAfterAcquire方法，将当前线程节点从链表中解绑。
+    */
+void ObjectMonitor::ExitEpilog (Thread * Self, ObjectWaiter * Wakee) {
+   assert (_owner == Self, "invariant") ;
+   _succ = Knob_SuccEnabled ? Wakee->_thread : NULL ;
+   ParkEvent * Trigger = Wakee->_event ;
+   Wakee  = NULL ;
+
+   OrderAccess::release_store_ptr (&_owner, NULL) ;
+   OrderAccess::fence() ;
+
+   if (SafepointSynchronize::do_call_back()) {
+      TEVENT (unpark before SAFEPOINT) ;
+   }
+
+   DTRACE_MONITOR_PROBE(contended__exit, this, object(), Self);
+   Trigger->unpark() ;
+   if (ObjectMonitor::_sync_Parks != NULL) {
+      ObjectMonitor::_sync_Parks->inc() ;
+   }
+}
+```
+
+我们先来稍微总结一下`ObjectMonitor::exit(bool not_suspended, TRAPS)`中的五种策略。
+
+* **QMode为0，也就是默认状态下。线程的唤醒顺序首先是`_EntryList`中的节点，当`_EntryList`为NULL时，`_EntryList`会指向`_cxq`指向的链表，`_cxq`指针重置，并将节点状态变为TS_ENTER，且会形成双向链表。**
+* QMode为1，线程的唤醒顺序还是从`_EntryList`中的节点开始，当`_EntryList`为NULL，`_EntryList`会指向`_cxq`指向的链表，`_cxq`指针重置，并将节点状态变为TS_ENTER，此处会逆序原先`_cxq`链表，使其呈现出**FIFO**的策略。
+
+* QMode为2，这个相对比较简单。线程的唤醒的顺序是从`_cxq`中的节点开始，当`_cxq`为NULL的时候，继续从`_EntryList`中开始唤醒。
+* QMode为3， 此处会将`_cxq`中的节点状态变更为TS_ENTER，之后会追加到`_EntryList`链表队尾之后，实现两个链表之间的合并，此时`_cxq`为NULL，线程的唤醒的顺序是新`_EntryList`链表中的节点。
+
+* QMode为4，此处会将`_cxq`中的节点状态变更为TS_ENTER，之后会放置到`_EntryList`链表队首之前，实现两个链表之间的合并，而在此时`_cxq`为NULL，线程的唤醒的顺序是新`_EntryList`链表中的节点。
+
+总结完出队策略 之后，我们以图示的方式再来回顾`ObjectMonitor::exit(bool not_suspended, TRAPS)`的整个流程。
+
+<img src="../resource/pictures/concurrent/monitor_exit.png" style="zoom:120%;" />
+
+
+
