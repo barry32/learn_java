@@ -404,7 +404,7 @@ void ATTR ObjectMonitor::EnterI (TRAPS) {
 
 我们稍微梳理一下`ObjectMonitor::enter`方法。
 
-<img src="../resource/pictures/concurrent/monitor_enter.png" style="zoom:100%;" />
+<img src="../resource/pictures/concurrent/monitor_enter.png" style="zoom:120%;" />
 
 现在我们一起来了解`ObjectMonitor::exit`， 我们先找到对应的行数`src/share/vm/runtime/objectMonitor.cpp:962`
 
@@ -680,7 +680,387 @@ void ObjectMonitor::ExitEpilog (Thread * Self, ObjectWaiter * Wakee) {
 
 总结完出队策略 之后，我们以图示的方式再来回顾`ObjectMonitor::exit(bool not_suspended, TRAPS)`的整个流程。
 
-<img src="../resource/pictures/concurrent/monitor_exit.png" style="zoom:120%;" />
+<img src="../resource/pictures/concurrent/monitor_exit.png" style="zoom:200%;" />
 
+了解完`ObjectMonitor::enter(TRAPS)`、`ObjectMonitor::exit(bool not_suspended, TRAPS)`之后，我们再来看下`ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS)`、`ObjectMonitor::notify(TRAPS)`、`ObjectMonitor::notifyAll(TRAPS)`这些代码的实现，这样我们就会对Java版本的Monitor有一个更清晰的认识。首先，我们先来看`ObjectMonitor::notify(TRAPS)`的实现。
 
+```java
+void ObjectMonitor::notify(TRAPS) {
+  //首先检查当前线程是否拥有Monitor锁，也就是_owner是否指向当前线程，不是的话检查_owner是否指向当前线程的
+  //Lock Record,否则抛出异常。参考代码:src/share/vm/runtime/objectMonitor.cpp:1422
+  CHECK_OWNER();
+  //_WaitSet顾名思义就是当线程调用了park()方法，而该方法也是Java中wait()系列方法的核心实现方
+  //式，此外_WaitSet也是一个指向ObjectWaiter链表类型的指针。但和_EntryList、_cxq不同的是，_WaitSet
+  //实际上是链表形成的队列，等到看wait()方法的时候再细聊。
+  if (_WaitSet == NULL) {
+     TEVENT (Empty-Notify) ;
+     return ;
+  }
+  DTRACE_MONITOR_PROBE(notify, this, object(), THREAD);
+  //这边是一个出队策略，默认值为2，参考：static int Knob_MoveNotifyee = 2 ;
+  int Policy = Knob_MoveNotifyee ;
+  //尝试获取队列锁，_WaitSetLock默认值为0，此时仍旧是使用CAS的方式将_WaitSetLock赋值为1，CAS的返回
+  //值为0,则说明当先线程成功获取_WaitSetLock锁，参考代码: src/share/vm/runtime/thread.cpp:4451
+  Thread::SpinAcquire (&_WaitSetLock, "WaitSet - notify") ;
+  //这里是将_WaitSet队头节点解绑。并让尾结点和次头节点相连。
+  ObjectWaiter * iterator = DequeueWaiter() ;
+  if (iterator != NULL) {
+     TEVENT (Notify1 - Transfer) ;
+     guarantee (iterator->TState == ObjectWaiter::TS_WAIT, "invariant") ;
+     guarantee (iterator->_notified == 0, "invariant") ;
+     //Policy默认值为2，变更节点的状态为TS_ENTER，而我们知道_EntryList链表中的节点状态值也为TS_ENTER
+     //之后将_waitSet之前的队头节点，也就是iterator指向的节点的_notified标记为1，表示当前节点是被其他线      //程通知到，可以用来唤醒的线程。相应的，该节点的也标记了其是被当先线程通知的，并记录在_notifier_tid
+     if (Policy != 4) {
+        iterator->TState = ObjectWaiter::TS_ENTER ;
+     }
+     iterator->_notified = 1 ;
+     Thread * Self = THREAD;
+     iterator->_notifier_tid = JFR_THREAD_ID(Self);
+     //List指向_EntryList,下文会将被通知到的线程iterator进行一个合并。
+     ObjectWaiter * List = _EntryList ;
+     if (List != NULL) {
+        assert (List->_prev == NULL, "invariant") ;
+        assert (List->TState == ObjectWaiter::TS_ENTER, "invariant") ;
+        assert (List != iterator, "invariant") ;
+     }
+     //策略0: 将被通知到的节点作为_EntryList的头节点。连起来理解就是，在出队策略0中，_waitSet队首元素，	   //将会使用头插法，插入到_EntryList中，之后_EntryList指向新的链表的头节点。
+     if (Policy == 0) {
+         if (List == NULL) {
+             iterator->_next = iterator->_prev = NULL ;
+             _EntryList = iterator ;
+         } else {
+             List->_prev = iterator ;
+             iterator->_next = List ;
+             iterator->_prev = NULL ;
+             _EntryList = iterator ;
+        }
+     }else
+     //策略1: 将被通知到的节点追加到_EntryList链表之后，如果之前_EntryList指向为空，当前节点将作为头结	   //点。
+     if (Policy == 1) {
+         if (List == NULL) {
+             iterator->_next = iterator->_prev = NULL ;
+             _EntryList = iterator ;
+         } else {
+            //遍历List，而List指向的是_EntryList,之后将当前被通知的节点追加到_EntryList链表尾部。
+            ObjectWaiter * Tail ;
+            for (Tail = List ; Tail->_next != NULL ; Tail = Tail->_next) ;
+            assert (Tail != NULL && Tail->_next == NULL, "invariant") ;
+            Tail->_next = iterator ;
+            iterator->_prev = Tail ;
+            iterator->_next = NULL ;
+        }
+     } else
+     //策略2(notify方法的默认策略)：这边需要注意的是当_EntryList链表为空，被唤醒的节点将会作为
+     //_EntryList。否则，将被唤醒的节点作为_cxq的头结点，然后使用CAS的方式将_cxq指向最新的头结点，防止此
+     //时存在新的线程尝试获取Monitor锁失败阻塞之后，使用头插法的方式插入到_cxq链表中。
+     if (Policy == 2) {
+         if (List == NULL) {
+             iterator->_next = iterator->_prev = NULL ;
+             _EntryList = iterator ;
+         } else {
+            iterator->TState = ObjectWaiter::TS_CXQ ;
+            for (;;) {
+                ObjectWaiter * Front = _cxq ;
+                iterator->_next = Front ;
+                if (Atomic::cmpxchg_ptr (iterator, &_cxq, Front) == Front) {
+                    break ;
+                }
+            }
+         }
+     } else
+     //策略3: 此时如果_cxq链表为空，则使用CAS的方式将当前被唤醒的节点作为_cxq的头结点。否则，开始遍历_cxq      //找到_cxq链表中的最后一个节点，并使用尾插法将当前节点插入到_cxq链表。
+     if (Policy == 3) {
+        iterator->TState = ObjectWaiter::TS_CXQ ;
+        for (;;) {
+            ObjectWaiter * Tail ;
+            Tail = _cxq ;
+            if (Tail == NULL) {
+                iterator->_next = NULL ;
+                if (Atomic::cmpxchg_ptr (iterator, &_cxq, NULL) == NULL) {
+                   break ;
+                }
+            } else {
+                while (Tail->_next != NULL) Tail = Tail->_next ;
+                Tail->_next = iterator ;
+                iterator->_prev = Tail ;
+                iterator->_next = NULL ;
+                break ;
+            }
+        }
+     //其他情况直接使用unpack方法，唤醒当前线程。对应节点的状态为TS_RUN
+     } else {
+        ParkEvent * ev = iterator->_event ;
+        iterator->TState = ObjectWaiter::TS_RUN ;
+        OrderAccess::fence() ;
+        ev->unpark() ;
+     }
 
+     if (Policy < 4) {
+       iterator->wait_reenter_begin(this);
+     }
+  }
+  //释放_WaitSetLock锁，实现方式比较简单，就是将其置为0,
+  //参考代码：src/share/vm/runtime/thread.cpp:4478
+  Thread::SpinRelease (&_WaitSetLock) ;
+
+  if (iterator != NULL && ObjectMonitor::_sync_Notifications != NULL) {
+     ObjectMonitor::_sync_Notifications->inc() ;
+  }
+}
+```
+
+我们先来看ObjectMonitor::DequeueWaiter的实现方式，因为其内部实现涉及到`ObjectMonitor::DequeueSpecificWaiter(ObjectWaiter* node)`，这边的代码顺便一起看下。
+
+```c++
+inline ObjectWaiter* ObjectMonitor::DequeueWaiter() {
+  //这里是将_WaitSet指向的第一个节点出队，也就是队头出队。
+  ObjectWaiter* waiter = _WaitSet;
+  if (waiter) {
+    DequeueSpecificWaiter(waiter);
+  }
+  return waiter;
+}
+
+inline void ObjectMonitor::DequeueSpecificWaiter(ObjectWaiter* node) {
+  assert(node != NULL, "should not dequeue NULL node");
+  assert(node->_prev != NULL, "node already removed from list");
+  assert(node->_next != NULL, "node already removed from list");
+
+  //next指向直接后继节点，如果仍旧等于当前节点，则表示_WaitSet队列当前只有一个节点。
+  ObjectWaiter* next = node->_next;
+  if (next == node) {
+    assert(node->_prev == node, "invariant check");
+    _WaitSet = NULL;
+  } else {
+    //prev指向直接前继节点，之后直接后继的前驱指针指向直接前继节点，直接前继的后继指针指向直接后继节点。
+    //并更新_WaitSet指针，清空node节点前后指针。
+    ObjectWaiter* prev = node->_prev;
+    assert(prev->_next == node, "invariant check");
+    assert(next->_prev == node, "invariant check");
+    next->_prev = prev;
+    prev->_next = next;
+    if (_WaitSet == node) {
+      _WaitSet = next;
+    }
+  } 
+  node->_next = NULL;
+  node->_prev = NULL;
+}
+```
+
+我们来稍微理一理`ObjectMonitor::notify(TRAPS)`的逻辑，就会发现一些有意思的情况。首先被通知的节点是
+
+`_WaitSet`队列的头结点。在之后的唤醒策略中，有关于`_WaitSet`和`_EntryList`、`_cxq`之间节点的流转。
+
+* 策略0：将当前节点使用头插法插在`_EntryList`上，如果`_EntryList`为空，则将当前节点作为`_EntryList`的头节点。
+* 策略1：将当前节点使用尾插法追加在`_EntryList`之后，如果`_EntryList`为空，则将当前节点作为`_EntryList`的头节点。
+* **策略2：也是Notify()系列方法默认的唤醒策略，当`_EntryList`为空，则将`_EntryList`指向当前节点作为其头节点，联系exit()方法可以看到，在默认状态下优先从`_EntryList`出队，所以此处也算是一种优化。否则，也就是`_EntryList`不为空，则使用头插法将当前节点插入到_cxq的链表的头部。**
+
+* 策略3：将当前节点使用尾插法的方式插入到`_cxq`链表尾部。
+
+到这边`ObjectMonitor::notify(TRAPS)`的方法已经结束，这可能更我们想象中的不一样，notify应该字如其名，应该调用unpack()系列方法来唤醒，当前节点。**但是，实际上这里只是将`_WaitSet`的队首节点，出队之后并按照唤醒规则，添加到`_EntryList`或者`_cxq`链表中。真正意义上的唤醒，是在exit()当前线程准备退出并释放Monitor锁的时候，这边也就跟Hanson版本的Monitor有点类似了。**
+
+我们还是用图示的方式，来回顾一下`ObjectMonitor::notify(TRAPS)`的整个流程。
+
+<img src="../resource/pictures/concurrent/monitor_notify.png" style="zoom:200%;" />
+
+`ObjectMonitor::notifyAll(TRAPS)`这个方法就不再讲了，因为和`ObjectMonitor::notify(TRAPS)`很相似，只是在外层加了一套for循环，这样每次都会取`_WaitSet`的队头节点，重复执行上述的操作。参考代码：`src/share/vm/runtime/objectMonitor.cpp:1825`。
+
+最后，我们再来看下`ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS)`
+
+```c++
+void ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS) {
+   Thread * const Self = THREAD ;
+   assert(Self->is_Java_thread(), "Must be Java thread!");
+   JavaThread *jt = (JavaThread *)THREAD;
+
+   DeferredInitialize () ;
+   //校验_owner是否指向当前线程，否的话，继续校验当前线程是否指向线程栈上的Lock Record，否则抛出异常
+   CHECK_OWNER();
+   EventJavaMonitorWait event;
+   //当当前线程被打断抛出异常
+   if (interruptible && Thread::is_interrupted(Self, true) && !HAS_PENDING_EXCEPTION) {
+     if (JvmtiExport::should_post_monitor_waited()) {
+        JvmtiExport::post_monitor_waited(jt, this, false);
+     }
+     if (event.should_commit()) {
+       post_monitor_wait_event(&event, this, 0, millis, false);
+     }
+     TEVENT (Wait - Throw IEX) ;
+     THROW(vmSymbols::java_lang_InterruptedException());
+     return ;
+   }
+
+   TEVENT (Wait) ;
+
+   assert (Self->_Stalled == 0, "invariant") ;
+   Self->_Stalled = intptr_t(this) ;
+   jt->set_current_waiting_monitor(this);
+
+   //为当前线程初始化一个名叫node的节点，用于插入双向循环队列_WaitSet，该队列中的节点的状态为TS_WAIT
+   ObjectWaiter node(Self);
+   node.TState = ObjectWaiter::TS_WAIT ;
+   Self->_ParkEvent->reset() ;
+   OrderAccess::fence();
+
+   //尝试获取_WaitSetLock锁，_WaitSetLock的默认值为0，此处在循环中轮训使用CAS的方式尝试将其赋值为1。
+   //参考以下代码： src/share/vm/runtime/thread.cpp:4451
+   Thread::SpinAcquire (&_WaitSetLock, "WaitSet - add") ;
+   //后面会详细展开该方法 
+   AddWaiter (&node) ;
+   //node节点已经插入双向循环队列_WaitSet，此处释放_WaitSetLock，也就是将_WaitSetLock重置为0。
+   Thread::SpinRelease (&_WaitSetLock) ;
+   //SyncFlags同步标识默认为0
+   if ((SyncFlags & 4) == 0) {
+      _Responsible = NULL ;
+   }
+   //当前线程已经进入_WaitSet，_waiters计数器加一，之后退出Monitor
+   intptr_t save = _recursions;
+   _waiters++;
+   _recursions = 0; 
+   exit (true, Self) ;
+   guarantee (_owner != Self, "invariant") ;
+
+   //退出释放Monitor锁之后，准备调用park()方法来阻塞当前线程。 
+   int ret = OS_OK ;
+   int WasNotified = 0 ;
+   {
+     OSThread* osthread = Self->osthread();
+     OSThreadWaitState osts(osthread, true);
+     {
+       ThreadBlockInVM tbivm(jt);
+       jt->set_suspend_equivalent();
+       
+       if (interruptible && (Thread::is_interrupted(THREAD, false) || HAS_PENDING_EXCEPTION)) {
+       } else
+       //_notified为0，表示当前节点没有被调用notify的系列方法，调用park()方法实现线程的阻塞，这也是		   //Java中wait()系列方法的核心方法。
+       if (node._notified == 0) {
+         if (millis <= 0) {
+            Self->_ParkEvent->park () ;
+         } else {
+            ret = Self->_ParkEvent->park (millis) ;
+         }
+       }
+
+       if (ExitSuspendEquivalent (jt)) {
+          jt->java_suspend_self();
+       }
+
+     }
+     //代码能够执行到这里，说明该节点已经被唤醒也就是调用了unpark()方法，或者被调用的park()时间已到。
+     //而如果当前节点的状态为TS_WAIT，这表明该节点的唤醒不是因为其他线程调用了notify()系列的方法，之后线      //程退出Monitor调用unpark()方法触发线程唤醒，因为notify()系列方法的四种唤醒策略，节点的状态要么变      //更为TS_CXQ、要么变更为TS_ENTER。在这里节点状态为TS_WAIT，表明当前节点是调用了有时限的park()方        //法，将该节点从_WaitSet解绑。而TS_RUN表示，当前节点不在链表中，之后可以尝试获取Monitor锁。
+     if (node.TState == ObjectWaiter::TS_WAIT) {
+         Thread::SpinAcquire (&_WaitSetLock, "WaitSet - unlink") ;
+         if (node.TState == ObjectWaiter::TS_WAIT) {
+            DequeueSpecificWaiter (&node) ;
+            assert(node._notified == 0, "invariant");
+            node.TState = ObjectWaiter::TS_RUN ;
+         }
+         Thread::SpinRelease (&_WaitSetLock) ;
+     }
+
+     guarantee (node.TState != ObjectWaiter::TS_WAIT, "invariant") ;
+     OrderAccess::loadload() ;
+     if (_succ == Self) _succ = NULL ;
+     WasNotified = node._notified ;
+     if (JvmtiExport::should_post_monitor_waited()) {
+       JvmtiExport::post_monitor_waited(jt, this, ret == OS_TIMEOUT);
+       //_notified不为空，表示当前节点已经被调用了notify()方法，调用再次调用unpark()排除线程挂起，没有
+       //线程进入Monitor情况。  
+       if (node._notified != 0 && _succ == Self) {
+         node._event->unpark();
+       }
+     }
+     if (event.should_commit()) {
+       post_monitor_wait_event(&event, this, node._notifier_tid, millis, ret == OS_TIMEOUT);
+     }
+
+     OrderAccess::fence() ;
+
+     assert (Self->_Stalled != 0, "invariant") ;
+     Self->_Stalled = 0 ;
+
+     assert (_owner != Self, "invariant") ;
+     ObjectWaiter::TStates v = node.TState ;
+     //如果当前节点状态为TS_RUN，表示当前节点的流程是调用了带有时间限制的wait()方法，park()时间结束之后，
+     //再次调用enter()尝试获取Monitor锁。反之，如果当前节点的状态为TS_ENTER、 TS_CXQ, 表示当前线程首先
+     //调用了wait()方法，之后被其他线程调用notify()方法，等该线程退出Monitor触发unpark(),线程被真正唤
+     //醒。转而调用ReenterI()方法。所以在此处，存在两种线程业务的流转:
+     //1. wait()--->timeout--->enter()....
+     //2. wait()--->notify--->ReenterI()...
+     if (v == ObjectWaiter::TS_RUN) {
+         enter (Self) ;
+     } else {
+         guarantee (v == ObjectWaiter::TS_ENTER || v == ObjectWaiter::TS_CXQ, "invariant") ;
+         ReenterI (Self, &node) ;
+         node.wait_reenter_end(this);
+     } 
+     guarantee (node.TState == ObjectWaiter::TS_RUN, "invariant") ;
+     assert    (_owner == Self, "invariant") ;
+     assert    (_succ != Self , "invariant") ;
+   }
+
+   jt->set_current_waiting_monitor(NULL);
+   //代码走到这个位置，表示当前线程已经重新获取了Monitor锁，更新_waiters、_recursions的计数。
+   guarantee (_recursions == 0, "invariant") ;
+   _recursions = save;
+   _waiters--;
+   assert (_owner == Self       , "invariant") ;
+   assert (_succ  != Self       , "invariant") ;
+   assert (((oop)(object()))->mark() == markOopDesc::encode(this), "invariant") ;
+   //SyncFlags同步标识默认为0
+   if (SyncFlags & 32) {
+      OrderAccess::fence() ;
+   }
+
+   //WasNotified为当前线程_notified的值，当值为0。表明当前线程可能是调用了有时间限制的wait()或者是线程
+   //打断情况,该情况抛出相应异常。 
+   if (!WasNotified) {
+     if (interruptible && Thread::is_interrupted(Self, true) && !HAS_PENDING_EXCEPTION) {
+       TEVENT (Wait - throw IEX from epilog) ;
+       THROW(vmSymbols::java_lang_InterruptedException());
+     }
+   }
+}
+```
+
+我们继续展开看下`ObjectMonitor::AddWaiter(ObjectWaiter* node)`的实现
+
+```c++
+inline void ObjectMonitor::AddWaiter(ObjectWaiter* node) {
+  assert(node != NULL, "should not dequeue NULL node");
+  assert(node->_prev == NULL, "node already in list");
+  assert(node->_next == NULL, "node already in list");
+  //这边_WaitSet如果为空，则_WaitSet指向当前节点，且节点的前驱和后继指针都指向自己，表明_WaitSet是一个双 
+  //向循环链表队列。一般情况下，在_WaitSet的队尾添加当前节点。
+  if (_WaitSet == NULL) {
+    _WaitSet = node;
+    node->_prev = node;
+    node->_next = node;
+  } else {
+    ObjectWaiter* head = _WaitSet ;
+    ObjectWaiter* tail = head->_prev;
+    assert(tail->_next == head, "invariant check");
+    tail->_next = node;
+    head->_prev = node;
+    node->_next = head;
+    node->_prev = tail;
+  }
+}
+```
+
+**在这里我们可能会有些疑问，为什么要`wait()--->notify--->ReenterI()..`这样的方式存在。相比enter()方法，ReenterI()可以更快的获取Monitor锁，属于一种优化方式。**`ObjectMonitor::ReenterI (Thread * Self, ObjectWaiter * SelfNode)`这边的代码不再展示。其实就是enterI()的后半段，以及后去Monitor锁之后，调用`UnlinkAfterAcquire()`将当前节点从队列中解绑，变更当前状态值为TS_RUN。表示当前线程已经获取了Monitor锁。参考代码如下：`src/share/vm/runtime/objectMonitor.cpp:757`
+
+我们还是以图示的方式来总结一下`ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS)`
+
+<img src="../resource/pictures/concurrent/monitor_wait.jpg" style="zoom:200%;" />
+
+直到这里，我们已经基本理清了Monitor的相关代码。并涉及`_EntryList`、`_cxq`、`_WaitSet`三种
+
+ObjectWaiter类型的指针，其中`_EntryList`指向的节点中的状态为`TS_ENTER`，`_cxq`指向的节点中的状态为`TS_CXQ`，`_WaitSet`指向的节点中的状态为`TS_WAIT`。线程尝试获取Monitor锁失败的时候，会使用头插法的方式，插入到`_cxq`，之后阻塞该线程。当线程释放Monitor锁之后，会按照不同的出队策略，此时涉及到`_cxq`和`_EntryList`链表中节点所在位置的转化，之后从链表的头部唤醒一个线程，当该线程获取到Monitor锁之后，会从对应链表中解绑出来。而对应的，一旦线程调用了wait()系列方法，当前线程除了校验`_owner`的指向问题外，会将当前节点插在双向链表队列`_WaitSet`的队尾，等到该线程被唤醒，再次尝试获取Monitor锁。最后，当线程调用了notify()系列方法，只会从`_WaitSet`的对头出一个节点，并按照唤醒策略，当前默认策略2，使用头插法插入到`_cxq`中。
+
+最后，我们再以图示的方式，总结一下总的业务流程。（主流程业务参考：`src/share/vm/runtime/mutex.cpp:89`）
+
+<img src="../resource/pictures/concurrent/thread_flow.png" style="zoom:100%;" />
+
+关于Monitor的代码比较长，涉及方面比较广，建议先看完**浅析并发编程(三)对象布局**基础之上再来学习，但是当我们了解完这一切之后，就为synchronize的学习奠定了基础。
