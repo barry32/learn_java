@@ -322,12 +322,14 @@
    }
    ```
 
+   
+
    2. 偏向锁的撤销和重偏向
 
    我们一起来看`BiasedLocking::revoke_and_rebias`方法，
 
    ```c++
-BiasedLocking::Condition BiasedLocking::revoke_and_rebias(Handle obj, bool attempt_rebias, TRAPS) {
+   BiasedLocking::Condition BiasedLocking::revoke_and_rebias(Handle obj, bool attempt_rebias, TRAPS) {
      assert(!SafepointSynchronize::is_at_safepoint(), "must not be called while at safepoint");
    
    
@@ -453,11 +455,11 @@ BiasedLocking::Condition BiasedLocking::revoke_and_rebias(Handle obj, bool attem
      return bulk_revoke.status_code();
    }
    ```
-   
+
    现在我们来看下`update_heuristics`这个探索性的方法的实现方式，
 
    ```c++
-static HeuristicsResult update_heuristics(oop o, bool allow_rebias) {
+   static HeuristicsResult update_heuristics(oop o, bool allow_rebias) {
      markOop mark = o->mark();
      //当锁对象的后三位不是101，给出的结论是不偏向  
      if (!mark->has_bias_pattern()) {
@@ -498,7 +500,7 @@ static HeuristicsResult update_heuristics(oop o, bool allow_rebias) {
      return HR_SINGLE_REVOKE;
    }
    ```
-   
+
    我们先来捋一下探索性方法的逻辑：
 
    * 当前锁对象不是偏向锁模式，给出的结论为不偏向
