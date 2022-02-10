@@ -324,7 +324,7 @@
 
    
 
-   2. 偏向锁的撤销和重偏向
+  2. 偏向锁的撤销和重偏向
 
    我们一起来看`BiasedLocking::revoke_and_rebias`方法，
 
