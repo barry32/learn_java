@@ -4,11 +4,7 @@
 
 1. 加锁流程
 
-   当共享资源被同一线程访问，当前资源的`object header`会偏向当前线程，之后当该线程访问当前共享资源
-
-   则不需要再加锁，这就是偏向锁存在的意义。
-
-   在学习之前我们需要一点前置知识，
+  当共享资源被同一线程访问，当前资源的`object header`会偏向当前线程，之后当该线程访问当前共享资源则不需要再加锁，这就是偏向锁存在的意义。在学习之前我们需要一点前置知识，
 
    ```c++
    //BasicObjectLock类中有两个变量_lock、_obj，而该类的实例对象就是我们认知中的Lock Record
@@ -21,7 +17,7 @@
    }  
    ```
 
-   `BasicObjectLock`类中`_lock`锁对应的类是`BasicLock`， 而`BasicLock`类中的变量是`_displaced_header`，对应的是类型是`markOop`该类在<B>浅析并发编程(三)对象布局</B>文章中是用来保存Mark Word，所以相应的，在该变量在后续的轻量级锁中，会用来保存共享对象object header的`Mark Word`。
+  `BasicObjectLock`类中`_lock`锁对应的类是`BasicLock`， 而`BasicLock`类中的变量是`_displaced_header`，对应的是类型是`markOop`该类在<B>浅析并发编程(三)对象布局</B>文章中是用来保存Mark Word，所以相应的，在该变量在后续的轻量级锁中，会用来保存共享对象object header的`Mark Word`。
 
    ```c++
    class BasicLock VALUE_OBJ_CLASS_SPEC {
@@ -32,7 +28,7 @@
      }
    ```
 
-   `oop`类中的变量是_o，是指向对象头的指针。
+  `oop`类中的变量是_o，是指向对象头的指针。
 
    ```c++
    class oop {
@@ -40,7 +36,7 @@
    }
    ```
 
-   所以`BasicObjectLock`类的实例就是Lock Record，其中`_obj`会指向对象头，`_lock`可以用来存放Mark Word。之后我们找到以下代码行`src/share/vm/interpreter/bytecodeInterpreter.cpp:1816`，
+  所以`BasicObjectLock`类的实例就是Lock Record，其中`_obj`会指向对象头，`_lock`可以用来存放Mark Word。之后我们找到以下代码行`src/share/vm/interpreter/bytecodeInterpreter.cpp:1816`，
 
    ```c++
    CASE(_monitorenter): {
@@ -254,7 +250,7 @@
    }
    ```
 
-   当出现线程竞争的情况就会进入到`InterpreterRuntime::monitorenter`方法，
+  当出现线程竞争的情况就会进入到`InterpreterRuntime::monitorenter`方法，
 
    ```c++
    IRT_ENTRY_NO_ASYNC(void, InterpreterRuntime::monitorenter(JavaThread* thread, BasicObjectLock* elem))
@@ -322,7 +318,7 @@
    }
    ```
 
-   
+
 
   2. 偏向锁的撤销和重偏向
 
