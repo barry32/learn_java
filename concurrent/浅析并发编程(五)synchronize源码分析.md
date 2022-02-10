@@ -14,7 +14,7 @@
      BasicLock _lock;
      oop       _obj; 
      ...
-   }  
+   }
    ```
 
   `BasicObjectLock`类中`_lock`锁对应的类是`BasicLock`， 而`BasicLock`类中的变量是`_displaced_header`，对应的是类型是`markOop`该类在<B>浅析并发编程(三)对象布局</B>文章中是用来保存Mark Word，所以相应的，在该变量在后续的轻量级锁中，会用来保存共享对象object header的`Mark Word`。
