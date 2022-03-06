@@ -18,7 +18,7 @@ AQS全名`AbstractQueuedSynchronizer`，也叫抽象同步队列，是J.U.C.包�
 
 从图上可以看到，AQS其本身继承自`AbstractOwnableSynchronizer`，实现了序列化接口，且拥有两个内部类`Node`和`ConditionObject`。我们就其中的属性，逐一查看。
 
-2.1 `AbstractOwnableSynchronizer`属性
+​	2.1 `AbstractOwnableSynchronizer`属性
 
 * `exclusiveOwnerThread`: AQS就其本身分为独占模式和共享模式，当处于独占模式的时候，该字段用来保存占用其独占锁的线程。
 * `head`:  用来指向CLH队列的头结点，而CLH就其名字来源于`Craig`、` Landin`、`Hagersten`的三个人名的缩写，CLH其实是由AQS内部类Node的节点组成的FIFO的双向链表。
@@ -34,7 +34,7 @@ AQS全名`AbstractQueuedSynchronizer`，也叫抽象同步队列，是J.U.C.包�
 
 
 
-2.2 `Node`内部类属性
+​	2.2 `Node`内部类属性
 
 Node节点是CLH双向链表和condition queue队列的组成部分。
 
@@ -61,8 +61,8 @@ Node节点是CLH双向链表和condition queue队列的组成部分。
 * `nextWaiter`: 该字段一式两用，在CLH链表中表示当前节点为独占模式或者共享模式，在condition queue中用来指向当前节点的直接后继。
 
   
-
-2.3内部类`ConditionObject`属性
+  
+  2.3内部类`ConditionObject`属性
 
 `ConditionObject`为AQS中独占模式服务，当调用了`await()`系列方法，此时会生成`waitStatus`为`CONDITION`、thread为当前线程的Node节点，并将当前节点在Condition queue队列中入队。
 
@@ -325,229 +325,233 @@ Node节点是CLH双向链表和condition queue队列的组成部分。
    }
    ```
 
-   4. `await()`和`signal()`系列方法
+   
 
-      通过独占锁的加解锁理解了AQS独占模式的加解锁流程，此外Condition其本身也是为AQS的独占模式服务的。而每一个独占锁实例对象可以拥有多个Condition对象，创建Condition对象的方式如下。
+   
 
-      ```java
-      private final static ReentrantLock lock = new ReentrantLock(true);
-      private final static Condition notFull = lock.newCondition();
-      private final static Condition notEmpty = lock.newCondition();
-      ```
+4. `await()`和`signal()`系列方法
 
-      此外，Condition对象的中await()和signal()方法，作用与Object对象的wait()和notify()系列方法相似，用来完成线程之间同步作业。所以在此处，可以通过源码的方式一起来了解一下。
+   通过独占锁的加解锁理解了AQS独占模式的加解锁流程，此外Condition其本身也是为AQS的独占模式服务的。而每一个独占锁实例对象可以拥有多个Condition对象，创建Condition对象的方式如下。
 
-      4.1 `await()`源码
+   ```java
+   private final static ReentrantLock lock = new ReentrantLock(true);
+   private final static Condition notFull = lock.newCondition();
+   private final static Condition notEmpty = lock.newCondition();
+   ```
 
-      ```java
-      public final void await() throws InterruptedException {
-          //判断当前线程是否被打断，被打断则抛出异常，因为await()是对打断做出响应的方法。
-          if (Thread.interrupted())
-              throw new InterruptedException();
-          //在此处先将Node节点插入到condition queue中，
-          //完成之后再调用fullyRelease释放锁。
-          Node node = addConditionWaiter();
-          int savedState = fullyRelease(node);
-          int interruptMode = 0;
-          //此处尝试调用park方法阻塞当前线程，直到当前线程出现在CLH双向链表中
-          //因为当调用了signal()系列方法，当前Node节点就会重新加入CLH链表
-          //或者当前线程被打断，也会跳出循环。
-          while (!isOnSyncQueue(node)) {
-              LockSupport.park(this);
-              if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
-                  break;
-          }
-          //代码执行到这个地方，说明当前线程节点已经被调用了signal()系列方法，或者被打断了
-          //继续指向后续代码获取锁，获取锁成功之后，查看当前线程是否被打断。
-          //THROW_IE表示在SIGNAL之前被打断，REINTERRUPT表示是在被调用了SIGNAL之后被打断。
-          //最后按照被打断的情况来处理。
-          if (acquireQueued(node, savedState) && interruptMode != THROW_IE)
-              interruptMode = REINTERRUPT;
-          if (node.nextWaiter != null)
-              unlinkCancelledWaiters();
-          if (interruptMode != 0)
-              reportInterruptAfterWait(interruptMode);
-      }
-      
-      private Node addConditionWaiter() {
-          Node t = lastWaiter;
-          //将condition queue中waitStatus状态不为CONDITION的节点，取消掉。
-          if (t != null && t.waitStatus != Node.CONDITION) {
-              unlinkCancelledWaiters();
-              t = lastWaiter;
-          }
-          //此时关于当前线程新增Node节点且状态为CONDITION，使用尾插法插入到condition queue
-          //队列中，节点之间使用nextWaiter作为关联。
+   此外，Condition对象的中await()和signal()方法，作用与Object对象的wait()和notify()系列方法相似，用来完成线程之间同步作业。所以在此处，可以通过源码的方式一起来了解一下。
+
+   4.1 `await()`源码
+
+   ```java
+   public final void await() throws InterruptedException {
+       //判断当前线程是否被打断，被打断则抛出异常，因为await()是对打断做出响应的方法。
+       if (Thread.interrupted())
+           throw new InterruptedException();
+       //在此处先将Node节点插入到condition queue中，
+       //完成之后再调用fullyRelease释放锁。
+       Node node = addConditionWaiter();
+       int savedState = fullyRelease(node);
+       int interruptMode = 0;
+       //此处尝试调用park方法阻塞当前线程，直到当前线程出现在CLH双向链表中
+       //因为当调用了signal()系列方法，当前Node节点就会重新加入CLH链表
+       //或者当前线程被打断，也会跳出循环。
+       while (!isOnSyncQueue(node)) {
+           LockSupport.park(this);
+           if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
+               break;
+       }
+       //代码执行到这个地方，说明当前线程节点已经被调用了signal()系列方法，或者被打断了
+       //继续指向后续代码获取锁，获取锁成功之后，查看当前线程是否被打断。
+       //THROW_IE表示在SIGNAL之前被打断，REINTERRUPT表示是在被调用了SIGNAL之后被打断。
+       //最后按照被打断的情况来处理。
+       if (acquireQueued(node, savedState) && interruptMode != THROW_IE)
+           interruptMode = REINTERRUPT;
+       if (node.nextWaiter != null)
+           unlinkCancelledWaiters();
+       if (interruptMode != 0)
+           reportInterruptAfterWait(interruptMode);
+   }
+   
+   private Node addConditionWaiter() {
+       Node t = lastWaiter;
+       //将condition queue中waitStatus状态不为CONDITION的节点，取消掉。
+       if (t != null && t.waitStatus != Node.CONDITION) {
+           unlinkCancelledWaiters();
+           t = lastWaiter;
+       }
+       //此时关于当前线程新增Node节点且状态为CONDITION，使用尾插法插入到condition queue
+       //队列中，节点之间使用nextWaiter作为关联。
     Node node = new Node(Thread.currentThread(), Node.CONDITION);
-          if (t == null)
-              firstWaiter = node;
-          else
-              t.nextWaiter = node;
-          lastWaiter = node;
-          return node;
-      }
-      
-      private void unlinkCancelledWaiters() {
-          Node t = firstWaiter;
-          Node trail = null;
-          //从firstWaiter指向的头结点开始，将已经取消的节点解绑。
-          //变量t指向当前节点，变量next指向t的直接后继节点，
-          //变量trail指向不需要解绑的、也就是状态为CONDITION的Node节点
-          //如果condition queue中的头结点，需要取消则firstWaiter后移
-          //如果已经遍历结束，因为trail始终指向状态为CONDITION的最后一个节点，
-          //直接更新lastWaiter节点即可。
-          while (t != null) {
-              Node next = t.nextWaiter;
-              if (t.waitStatus != Node.CONDITION) {
-                  t.nextWaiter = null;
-                  if (trail == null)
-                      firstWaiter = next;
-                  else
-                      trail.nextWaiter = next;
-                  if (next == null)
-                      lastWaiter = trail;
-              }
-              else
-                  trail = t;
-              t = next;
-          }
-      }
-      
-      
-      final int fullyRelease(Node node) {
-          boolean failed = true;
-          try {
-              //在fullyRelease中首先获取state值，之后调用release
-              //该方法我们已经看过，在此处再回顾一下，如果当前线程不是重入状态，
-              //此时release方法必将返回true，直接返回即可。
-              //若当前线程为重入状态，且state值超过1，且调用了await()方法，
-              //将会抛出异常，最后将装填值置为CANCELLED
-              int savedState = getState();
-              if (release(savedState)) {
-                  failed = false;
-                  return savedState;
-              } else {
-                  throw new IllegalMonitorStateException();
-              }
-          } finally {
-              if (failed)
-                  node.waitStatus = Node.CANCELLED;
-          }
-      }
-      
-      //查看当前线程是否在CLH链表中
-      final boolean isOnSyncQueue(Node node) {
-          if (node.waitStatus == Node.CONDITION || node.prev == null)
-              return false;
-          if (node.next != null)
-              return true;
-          return findNodeFromTail(node);
-      }
-      //从CLH尾结点开始遍历，因为一但其他线程调用了signal()方法，
-      //当前节点就会使用尾插法插入到CLH链表中，所以从尾结点开始遍历效率高一些。
-      private boolean findNodeFromTail(Node node) {
-          Node t = tail;
-          for (;;) {
-              if (t == node)
-                  return true;
-              if (t == null)
-                  return false;
-              t = t.prev;
-          }
-      }
-      
-      //因为THROW_IE表示是在SIGNAL系列方法调用之前被打断，
-      //所以当时是在await()中，而线程因为park()系列方法被阻塞了，所以是打断了await()方法
-      //而await()方法在执行过程中是对线程做出响应的，所以抛出异常。
-      //REINTERRUPT表示是在SINGAL系列方法调用之后被打断了，之后当前线程进入
-      //acquireQueued()方法，而该方法在执行过程中不对线程打断做出响应，只是单纯的记录线程被打断。
-      //所以在此处调用selfInterrupt()打断线程，作为补偿。
-      private void reportInterruptAfterWait(int interruptMode)
-          throws InterruptedException {
-          if (interruptMode == THROW_IE)
-              throw new InterruptedException();
-          else if (interruptMode == REINTERRUPT)
-              selfInterrupt();
-      }
-      ```
-      
-      4.2signal()源码
-      
-      ```java
-      public final void signal() {
-          //检查在调用signal核心方法之前，当前线程是否拥有该独占锁。
-          if (!isHeldExclusively())
-              throw new IllegalMonitorStateException();
-          Node first = firstWaiter;
-          if (first != null)
-              doSignal(first);
-      }
-      //校验当前线程是否拥有该独占锁的方式，就是判断exclusiveOwnerThread是否指向当前线程。
-      protected final boolean isHeldExclusively() {
-          return getExclusiveOwnerThread() == Thread.currentThread();
-      }
-      
-      private void doSignal(Node first) {
-          do {
-              //前要信息：
-              //在condition queue中，firstWaiter指向第一个Node节点，
-              //lastWaiter指向最后一个Node节点。节点之间使用nextWaiter变量进行关联。
-              //
-              //doSignal逻辑:
-              //1. 将first节点从condition queue中解绑
-              //当first的下一个节点为空，说明first为condition queue中最后一个节点，
-              //此时说明firstWaiter和lastWaiter指针都指向first节点，将两个指针清空。
-              //但是，如果first的下一个节点不为空，此时只需要firstWaiter指针向后移动一个。
-              //接着，将first节点从condition queue中解绑。
-              //2. 将first节点加入CLH链表
-              //在transferForSignal方法展开。当transferForSignal返回false
-              //说明当前节点已经被取消，frist指向新的firstWaiter，此时需要重新
-              //处理condition queue中的下一个节点，直到成功将当前节点插入到CLH链表中。
-              if ( (firstWaiter = first.nextWaiter) == null)
-                  lastWaiter = null;
-              first.nextWaiter = null;
-          } while (!transferForSignal(first) &&
-                   (first = firstWaiter) != null);
-      }
-      
-      final boolean transferForSignal(Node node) {
-      
-          //使用CAS的方式将当前当前节点也就是先前condition queue的头结点的状态重置为0
-          //因为condition queue中节点的正常状态为Node.CONDITION，
-          //所以如果CAS失败，说明当前节点已经被取消了，直接返回。
-          if (!compareAndSetWaitStatus(node, Node.CONDITION,0))
-              return false;
-      	//使用enq()方法将当前node节点插入到CLH链表中，同时该方法返回CLH前tail节点，
-          //也就是当前node节点的直接前驱节点。而如果该前驱节点的waitStatus大于0，
-          //也就是说该前驱节点已经被取消了。或者是该前驱节点的状态在if判断的时候，
-          //发生了变化导致CAS失败，唤醒当前线程，再次尝试获取锁。相应代码查看await()方法后半段。
-          //注：
-          //代码虽然到这个地方结束了，但是还可以注意到小细节，如果CLH的链表的tail指向的尾节点
-          //没有被取消，整个signal()方法的逻辑，就只是将condition queue中的头节点解绑，然后
-          //加入到CLH双向链表中，而把唤醒的真正任务交给了持有锁的线程节点，当该节点释放锁的时候，
-          //将会唤醒其后继节点。如果是看过浅析并发编程(四)Monitor重量级锁的同学，就会发现
-          //signal()、await()和wait()、notify()的逻辑相似。只不过，notify()和wait()
-          //使用了waitSetLock这个变量来进行加锁。而signal()和await()保证了调用该方法的线程
-          //持有了锁，也就是exclusiveOwnerThread指向当前线程。
-          Node p = enq(node);
-          int ws = p.waitStatus;
-          if (ws > 0 || !compareAndSetWaitStatus(p, ws, Node.SIGNAL))
-              LockSupport.unpark(node.thread);
-          return true;
-      }
-      ```
-      
-      4.3 `signalAll()`
-      
-      `signalAll()`和`signal()`类似，只是将condition queue队列全部清空，循环调用
-      
-      `transferForSignal`方法。
-      
-   5. 总结
+       if (t == null)
+           firstWaiter = node;
+       else
+           t.nextWaiter = node;
+       lastWaiter = node;
+       return node;
+   }
    
+   private void unlinkCancelledWaiters() {
+       Node t = firstWaiter;
+       Node trail = null;
+       //从firstWaiter指向的头结点开始，将已经取消的节点解绑。
+       //变量t指向当前节点，变量next指向t的直接后继节点，
+       //变量trail指向不需要解绑的、也就是状态为CONDITION的Node节点
+       //如果condition queue中的头结点，需要取消则firstWaiter后移
+       //如果已经遍历结束，因为trail始终指向状态为CONDITION的最后一个节点，
+       //直接更新lastWaiter节点即可。
+       while (t != null) {
+           Node next = t.nextWaiter;
+           if (t.waitStatus != Node.CONDITION) {
+               t.nextWaiter = null;
+               if (trail == null)
+                   firstWaiter = next;
+               else
+                   trail.nextWaiter = next;
+               if (next == null)
+                   lastWaiter = trail;
+           }
+           else
+               trail = t;
+           t = next;
+       }
+   }
+   
+   
+   final int fullyRelease(Node node) {
+       boolean failed = true;
+       try {
+           //在fullyRelease中首先获取state值，之后调用release
+           //该方法我们已经看过，在此处再回顾一下，如果当前线程不是重入状态，
+           //此时release方法必将返回true，直接返回即可。
+           //若当前线程为重入状态，且state值超过1，且调用了await()方法，
+           //将会抛出异常，最后将装填值置为CANCELLED
+           int savedState = getState();
+           if (release(savedState)) {
+               failed = false;
+               return savedState;
+           } else {
+               throw new IllegalMonitorStateException();
+           }
+       } finally {
+           if (failed)
+               node.waitStatus = Node.CANCELLED;
+       }
+   }
+   
+   //查看当前线程是否在CLH链表中
+   final boolean isOnSyncQueue(Node node) {
+       if (node.waitStatus == Node.CONDITION || node.prev == null)
+           return false;
+       if (node.next != null)
+           return true;
+       return findNodeFromTail(node);
+   }
+   //从CLH尾结点开始遍历，因为一但其他线程调用了signal()方法，
+   //当前节点就会使用尾插法插入到CLH链表中，所以从尾结点开始遍历效率高一些。
+   private boolean findNodeFromTail(Node node) {
+       Node t = tail;
+       for (;;) {
+           if (t == node)
+               return true;
+           if (t == null)
+               return false;
+           t = t.prev;
+       }
+   }
+   
+   //因为THROW_IE表示是在SIGNAL系列方法调用之前被打断，
+   //所以当时是在await()中，而线程因为park()系列方法被阻塞了，所以是打断了await()方法
+   //而await()方法在执行过程中是对线程做出响应的，所以抛出异常。
+   //REINTERRUPT表示是在SINGAL系列方法调用之后被打断了，之后当前线程进入
+   //acquireQueued()方法，而该方法在执行过程中不对线程打断做出响应，只是单纯的记录线程被打断。
+   //所以在此处调用selfInterrupt()打断线程，作为补偿。
+   private void reportInterruptAfterWait(int interruptMode)
+       throws InterruptedException {
+       if (interruptMode == THROW_IE)
+           throw new InterruptedException();
+       else if (interruptMode == REINTERRUPT)
+           selfInterrupt();
+   }
+   ```
+
+   4.2signal()源码
+
+   ```java
+   public final void signal() {
+       //检查在调用signal核心方法之前，当前线程是否拥有该独占锁。
+       if (!isHeldExclusively())
+           throw new IllegalMonitorStateException();
+       Node first = firstWaiter;
+       if (first != null)
+           doSignal(first);
+   }
+   //校验当前线程是否拥有该独占锁的方式，就是判断exclusiveOwnerThread是否指向当前线程。
+   protected final boolean isHeldExclusively() {
+       return getExclusiveOwnerThread() == Thread.currentThread();
+   }
+   
+   private void doSignal(Node first) {
+       do {
+           //前要信息：
+           //在condition queue中，firstWaiter指向第一个Node节点，
+           //lastWaiter指向最后一个Node节点。节点之间使用nextWaiter变量进行关联。
+           //
+           //doSignal逻辑:
+           //1. 将first节点从condition queue中解绑
+           //当first的下一个节点为空，说明first为condition queue中最后一个节点，
+           //此时说明firstWaiter和lastWaiter指针都指向first节点，将两个指针清空。
+           //但是，如果first的下一个节点不为空，此时只需要firstWaiter指针向后移动一个。
+           //接着，将first节点从condition queue中解绑。
+           //2. 将first节点加入CLH链表
+           //在transferForSignal方法展开。当transferForSignal返回false
+           //说明当前节点已经被取消，frist指向新的firstWaiter，此时需要重新
+           //处理condition queue中的下一个节点，直到成功将当前节点插入到CLH链表中。
+           if ( (firstWaiter = first.nextWaiter) == null)
+               lastWaiter = null;
+           first.nextWaiter = null;
+       } while (!transferForSignal(first) &&
+                (first = firstWaiter) != null);
+   }
+   
+   final boolean transferForSignal(Node node) {
+   
+       //使用CAS的方式将当前当前节点也就是先前condition queue的头结点的状态重置为0
+       //因为condition queue中节点的正常状态为Node.CONDITION，
+       //所以如果CAS失败，说明当前节点已经被取消了，直接返回。
+       if (!compareAndSetWaitStatus(node, Node.CONDITION,0))
+           return false;
+   	//使用enq()方法将当前node节点插入到CLH链表中，同时该方法返回CLH前tail节点，
+       //也就是当前node节点的直接前驱节点。而如果该前驱节点的waitStatus大于0，
+       //也就是说该前驱节点已经被取消了。或者是该前驱节点的状态在if判断的时候，
+       //发生了变化导致CAS失败，唤醒当前线程，再次尝试获取锁。相应代码查看await()方法后半段。
+       //注：
+       //代码虽然到这个地方结束了，但是还可以注意到小细节，如果CLH的链表的tail指向的尾节点
+       //没有被取消，整个signal()方法的逻辑，就只是将condition queue中的头节点解绑，然后
+       //加入到CLH双向链表中，而把唤醒的真正任务交给了持有锁的线程节点，当该节点释放锁的时候，
+       //将会唤醒其后继节点。如果是看过浅析并发编程(四)Monitor重量级锁的同学，就会发现
+       //signal()、await()和wait()、notify()的逻辑相似。只不过，notify()和wait()
+       //使用了waitSetLock这个变量来进行加锁。而signal()和await()保证了调用该方法的线程
+       //持有了锁，也就是exclusiveOwnerThread指向当前线程。
+       Node p = enq(node);
+       int ws = p.waitStatus;
+       if (ws > 0 || !compareAndSetWaitStatus(p, ws, Node.SIGNAL))
+           LockSupport.unpark(node.thread);
+       return true;
+   }
+   ```
+
+   4.3 `signalAll()`
+
+   `signalAll()`和`signal()`类似，只是将condition queue队列全部清空，循环调用
+
+   `transferForSignal`方法。
+
+5. 总结
+
    AQS的独占模式其实和synchronize原理有点类似，也是比较重要的一个板块，AQS的掌握对于后续
-   
-   ReentrantLock的学习很有帮助。
-   
+
+   `ReentrantLock`的学习很有帮助。
+
    
 
