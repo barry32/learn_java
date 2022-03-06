@@ -18,7 +18,7 @@ AQS全名`AbstractQueuedSynchronizer`，也叫抽象同步队列，是J.U.C.包�
 
 从图上可以看到，AQS其本身继承自`AbstractOwnableSynchronizer`，实现了序列化接口，且拥有两个内部类`Node`和`ConditionObject`。我们就其中的属性，逐一查看。
 
-   	2.1 `AbstractOwnableSynchronizer`属性
+   2.1 `AbstractOwnableSynchronizer`属性
 
 * `exclusiveOwnerThread`: AQS就其本身分为独占模式和共享模式，当处于独占模式的时候，该字段用来保存占用其独占锁的线程。
 
@@ -42,7 +42,7 @@ AQS全名`AbstractQueuedSynchronizer`，也叫抽象同步队列，是J.U.C.包�
 
 * `nextOffset`: Node内部类`next`字段相对于实例对象的偏移量，用于CAS算法的入参。'
 
-  2.2 `Node`内部类属性
+   2.2 `Node`内部类属性
 
 Node节点是CLH双向链表和condition queue队列的组成部分。
 
@@ -549,7 +549,7 @@ final boolean transferForSignal(Node node) {
 
 
 
-4.3 `signalAll()`   
+   4.3 `signalAll()`   
 
 `signalAll()`和`signal()`类似，只是将condition queue队列全部清空，循环调用
 
@@ -560,6 +560,4 @@ final boolean transferForSignal(Node node) {
    AQS的独占模式其实和synchronize原理有点类似，也是比较重要的一个板块，AQS的掌握对于后续
 
    `ReentrantLock`的学习很有帮助。
-
-   
 
