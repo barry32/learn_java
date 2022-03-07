@@ -1,4 +1,4 @@
-#### 浅析并发编程(六)AQS源码分析(一)独占锁模式
+
 
 1. 定义
 
@@ -40,7 +40,7 @@ AQS全名`AbstractQueuedSynchronizer`，也叫抽象同步队列，是J.U.C.包�
 
 * `waitStatusOffset`: Node内部类`waitStatus`字段相对于实例对象的偏移量，用于CAS算法的入参。
 
-* `nextOffset`: Node内部类`next`字段相对于实例对象的偏移量，用于CAS算法的入参。'
+* `nextOffset`: Node内部类`next`字段相对于实例对象的偏移量，用于CAS算法的入参。
 
    2.2 `Node`内部类属性
 
@@ -81,8 +81,6 @@ Node节点是CLH双向链表和condition queue队列的组成部分。
 
    因为AQS本身是一个抽象类，在此处我们以`ReentrantLock`的内部类`FairSync`也就是AQS的子类为例，了解一下加锁和解锁的流程。
 
-
-
  3.1 加锁流程
 
    ```java
@@ -97,7 +95,8 @@ static final class FairSync extends Sync {
 
 public final void acquire(int arg) {
     //tryAcquire获取锁失败之后，继续调用addWaiter()、acquireQueued()，生成关于当前线程的独占模式	//的节点，之后插入CLH的链表。然后将当前节点的直接前驱的waitStatus置为SIGNAL，而当前节点也会调用
-    //LockSupport.park系列方法，处于阻塞状态。当被打断后，调用selfInterrupt方法。
+    //LockSupport.park系列方法，处于阻塞状态。当被打断后重置打断状态，退出acquireQueued方法后，
+    //调用selfInterrupt方法作为补偿，尝试打断线程，重新标记线程的打断状态。
     if (!tryAcquire(arg) &&
         acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
         selfInterrupt();
@@ -264,13 +263,76 @@ private final boolean parkAndCheckInterrupt() {
 }
 
 //代码能够执行到这里说明，当前线程在park()方法中被打断，
-//但是在acquireQueued中没有响应打断,而是继续执行循环中的逻辑，所以在此处响应打断。
+//但是在acquireQueued中没有响应打断,而是在parkAndCheckInterrupt中重置打断状态，
+//而是继续执行循环中的逻辑，并在返回值中告知打断状态。所以在此作为补偿，尝试打断线程并标记线程的打断状态。
 static void selfInterrupt() {
     Thread.currentThread().interrupt();
 }
    ```
 
-  3.2解锁流程
+3. 12加锁流程图示
+
+加锁流程涉及到多个线程之间的竞争，我们使用一个例子一起来过一遍。
+
+假设有四个线程`ThreadA`、`ThreadB`、`ThreadC`、`ThreadD`尝试获取`ReentrantLock`中的公平锁，
+
+* `ThreadA`首先进入核心方法**tryAcquire()**，首先查看在CLH队列中是否有线程节点在`ThreadA`之前，
+
+  接着使用CAS，将state值设置为1，然后将`exclusiveOwnerThread`指向自己，获取锁成功后退出。  
+
+  
+
+  <img src="../resource/pictures/concurrent/AQS_ThreadA.png" alt="AQS_architecture" style="zoom:100%;" />
+
+* `ThreadB`在`ThreadA`之后进来，也是先进入到核心方法**tryAcquire()**。
+
+  但是此时state值已经变成了1，说明此时独占锁已经被`ThreadA`占用，直接返回。
+
+  * `ThreadB`进入了**addWaiter()**，因为此为独占锁模式，所以生成的Node节点`nextWaiter`
+
+    是**EXCLUSIVE**模式。
+
+  <img src="../resource/pictures/concurrent/AQS_threadB_new.png" alt="AQS_architecture" style="zoom:100%;" />
+
+  * 因为独占锁中的`tail`尾指针为空，所以直接进入到**enq()**中。之后使用CAS方法将`head`指向一个空白
+
+    Node节点，之后`tail`和`head`都指向这个空的Node节点。
+
+    <img src="../resource/pictures/concurrent/AQS_threadB_1.png" alt="AQS_architecture" style="zoom:100%;" />
+
+  * 之后`ThreadB`按照代码再次执行**enq()**中的逻辑，使用CAS将`ThreadB`插入到CLH链表中。
+
+    <img src="../resource/pictures/concurrent/AQS_threadB_2.png" alt="AQS_architecture" style="zoom:100%;" />
+
+  * `ThreadB`插入到CLH链表中之后，进入**acquireQueued()**逻辑，此时`ThreadB`的直接前驱是
+
+    head，说明`ThreadB`是CLH链表中的第一个等待获取独占锁节点的线程，此时`ThreadA`还未释放
+
+    锁，`ThreadB`获取锁失败进入**shouldParkAfterFailedAcquire**方法，head指向的节点为初始化节点，
+
+    并没有被取消，此时将`waitStatus`状态置为SIGNAL，之后调用`LockSupport.park()`阻塞当前线程，释放CPU。
+
+    <img src="../resource/pictures/concurrent/AQS_threadB_3.png" alt="AQS_architecture" style="zoom:100%;" />
+
+* `ThreadC`和`ThreadD`几乎是同时进入， 都尝试调用**tryAcquire**获取独占锁但都失败了，两个线程都进入了
+
+  **addWaiter**方法且两者都是独占模式，由于`tail`不为空，`ThreadC`和`ThreadD`都将前驱指针指向了tail，
+
+  之后使用CAS，只有`ThreadC`成功了。
+
+  <img src="../resource/pictures/concurrent/AQS_threadC_1.png" alt="AQS_architecture" style="zoom:100%;" />
+
+  * `ThreadC`  CAS成功之后进入了`acquireQueued()`，由于`ThreadC`的前驱节点不是head指向的节点。
+
+    之后前驱节点`ThreadB`的`waitStatus`状态置为SIGNAL，之后调用`LockSupport.park()`阻塞当前线程，释放CPU。在 `ThreadD`使用CAS之后进入到**enq()**，成功的插入了CLH链表。
+
+    <img src="../resource/pictures/concurrent/AQS_threadC_2.png" alt="AQS_architecture" style="zoom:100%;" />
+
+  * `ThreadD`之后也是将前驱节点`ThreadC`的状态置为SIGNAL，之后调用`LockSupport.park()`阻塞当前线程，释放CPU。
+
+  <img src="../resource/pictures/concurrent/AQS_threadD_1.png" alt="AQS_architecture" style="zoom:100%;" />
+
+3.2解锁流程
 
    ```java
 public void unlock() {
@@ -331,9 +393,33 @@ private void unparkSuccessor(Node node) {
 }
    ```
 
-   
+   3.21解锁流程图示
 
-   
+​	我们还是用刚刚的`ThreadA`、`ThreadB`、`ThreadC`、`ThreadD`四个线程的例子来过一遍解锁流程。
+
+* 解锁的逻辑相对加锁简单一点，`ThreadA`进行**tryRelease**的核心方法，首先将state值减一，之后将
+
+  `exclusiveOwnerThread`置为NULL，因为head指向的节点不为空，进入`unparkSuccessor`尝试唤醒下一个线程，首先将head指针指向的节点的状态重置为0，之后唤醒下一个`ThreadB`。
+
+  <img src="../resource/pictures/concurrent/AQS_threadA_release.png" alt="AQS_architecture" style="zoom:100%;" />
+
+* `ThreadB`被唤醒之后，继续执行**acquireQueued**的逻辑，此时`ThreadB`的前驱节点为head，表示该线程是
+
+  CLH链表中第一个等待获取锁的线程，此时调用**tryAcquire**成功获取了锁，将AQS中state值置为1，并将
+
+  `exclusiveOwnerThread`指向`ThreadB`。当`ThreadB`获取锁之后，head指针指向了`ThreadB`节点，然后清空了`ThreadB`节点的信息，并断开该节点和前驱节点的关联。
+
+  <img src="../resource/pictures/concurrent/AQS_threadA_release2.png" alt="AQS_architecture" style="zoom:100%;" />
+
+* `ThreadB`和`ThreadC`锁的释放和`ThreadA`锁的释放的过程类似，就不再赘述，就直接放图了。
+
+  <img src="../resource/pictures/concurrent/AQS_threadD_release1.png" alt="AQS_architecture" style="zoom:100%;" />
+
+* `ThreadD`开始释放，也是进入核心方法**tryRelease**，将state值置为0，同时将`exclusiveOwnerThread`置为NULL，之后进入`unparkSuccessor`将head指向的节点的状态置为0。
+
+  <img src="../resource/pictures/concurrent/AQS_threadD_release2.png" alt="AQS_architecture" style="zoom:100%;" />
+
+  
 
 4. `await()`和`signal()`系列方法
 
@@ -470,8 +556,9 @@ private boolean findNodeFromTail(Node node) {
 //所以当时是在await()中，而线程因为park()系列方法被阻塞了，所以是打断了await()方法
 //而await()方法在执行过程中是对线程做出响应的，所以抛出异常。
 //REINTERRUPT表示是在SINGAL系列方法调用之后被打断了，之后当前线程进入
-//acquireQueued()方法，而该方法在执行过程中不对线程打断做出响应，只是单纯的记录线程被打断。
-//所以在此处调用selfInterrupt()打断线程，作为补偿。
+//acquireQueued()方法，而该方法在执行过程中不对线程打断做出响应，
+//而是在parkAndCheckInterrupt中重置线程的打断状态，并将打断状态的结果作为返回值，
+//所以在此处调用selfInterrupt()尝试打断线程并标记为打断状态，作为补偿。
 private void reportInterruptAfterWait(int interruptMode)
     throws InterruptedException {
     if (interruptMode == THROW_IE)
