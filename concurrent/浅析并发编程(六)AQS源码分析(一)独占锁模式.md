@@ -644,13 +644,9 @@ final boolean transferForSignal(Node node) {
 
    4.3 `signalAll()`   
 
-`signalAll()`和`signal()`类似，只是将condition queue队列全部清空，循环调用
-
-   `transferForSignal`方法。
+​	`signalAll()`和`signal()`类似，只是将condition queue队列全部清空，循环调用 `transferForSignal`方法。
 
 5. 总结
 
-   AQS的独占模式其实和synchronize原理有点类似，也是比较重要的一个板块，AQS的掌握对于后续
-
-   `ReentrantLock`的学习很有帮助。
+   AQS的独占模式其实和synchronize原理有点类似，也是比较重要的一个板块，AQS的掌握对于后续`ReentrantLock`的学习很有帮助。
 
