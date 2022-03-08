@@ -1,4 +1,4 @@
-
+#### 浅析并发编程(六)AQS源码分析(一)独占锁模式
 
 1. 定义
 
@@ -568,6 +568,10 @@ private void reportInterruptAfterWait(int interruptMode)
 }
    ```
 
+我们再用图示的方式再一起来回顾一下await()方法。
+
+<img src="../resource/pictures/concurrent/AQS_await.png" alt="AQS_architecture" style="zoom:100%;" />
+
   4.2signal()源码
 
    ```java
@@ -634,7 +638,9 @@ final boolean transferForSignal(Node node) {
 }
    ```
 
+我们再使用图示的方式，来加深一下理解。
 
+<img src="../resource/pictures/concurrent/AQS_signal.png" alt="AQS_architecture" style="zoom:100%;" />
 
    4.3 `signalAll()`   
 
